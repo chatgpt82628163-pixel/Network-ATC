@@ -53,7 +53,8 @@ public sealed class Workspace : IDisposable
         if (_ownership == null) return;
         var online = _session.Controllers.Select(c => new OnlineStation(c.Callsign, Frequency.Format(c.FrequencyKhz))).ToList();
         online.Add(new OnlineStation(_session.Me, _session.Info is { } i ? Frequency.Format(i.FrequencyKhz) : _profile().Station.Frequency));
-        _ownership.Update(online);
+        // Sectors taken by hand count only while we are on the network.
+        _ownership.Update(online, _session.IsConnected ? _session.Me : null, _profile().MySectors);
     }
 
     /// <summary>Short name of a controller: its .ese identifier ("EA") or the callsign.</summary>

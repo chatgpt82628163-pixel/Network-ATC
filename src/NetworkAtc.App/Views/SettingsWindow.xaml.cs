@@ -74,6 +74,7 @@ public partial class SettingsWindow : Window
         ["FocusCommandLine"] = "Command line", ["ToggleAircraftList"] = "All traffic", ["ToggleMessages"] = "Messages",
         ["ToggleFlightPlan"] = "Flight plan", ["ToggleLayers"] = "Layers", ["OpenSettings"] = "Settings",
         ["Connect"] = "Connect", ["TrackSelected"] = "Assume selected", ["ClearSelection"] = "Clear selection",
+        ["DeleteRuler"] = "Delete ruler under the mouse",
         ["ToggleDepartures"] = "Departure list", ["ToggleArrivals"] = "Arrival list", ["ToggleConflicts"] = "Conflicts (STCA)",
         ["ToggleAtc"] = "Controllers", ["OpenSector"] = "Sector selection",
         ["AssumeOrAccept"] = "Assume / accept handoff", ["HandoffNext"] = "Hand off to next controller",

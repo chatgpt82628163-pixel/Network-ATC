@@ -183,6 +183,10 @@ public sealed class Profile
 
     /// <summary>Active runways per airport (EuroScope "Active airport/runway" dialog).</summary>
     public Dictionary<string, Sectors.RunwayUse> ActiveRunways { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+    /// <summary>Airspace sectors (.ese names) the controller takes by hand while online, whoever else is on.</summary>
+    public List<string> MySectors { get; set; } = [];
+    /// <summary>Tint the airspace the controller owns on the radar.</summary>
+    public bool HighlightOwnAirspace { get; set; } = true;
     /// <summary>Current ATIS letter per airport.</summary>
     public Dictionary<string, string> AtisLetters { get; set; } = new(StringComparer.OrdinalIgnoreCase);
     /// <summary>The controller's ATIS stations (UUEE_ATIS…): frequency, text, voice.</summary>
@@ -373,6 +377,7 @@ public sealed class Profile
         ["Connect"] = "Ctrl+K",
         ["TrackSelected"] = "F8",
         ["ClearSelection"] = "Escape",
+        ["DeleteRuler"] = "Delete",
         ["ToggleDepartures"] = "F5",
         ["ToggleArrivals"] = "F7",
         ["ToggleConflicts"] = "F9",
@@ -445,6 +450,7 @@ public sealed class Profile
                 p.Windows = new Dictionary<string, WindowLayout>(p.Windows ?? [], StringComparer.OrdinalIgnoreCase);
                 foreach (var (k, v) in DefaultWindows()) p.Windows.TryAdd(k, v);
                 p.ActiveAirports ??= [];
+                p.MySectors ??= [];
                 p.RecentSectors ??= [];
                 p.EsPlugins ??= [];
                 p.EsDisplayType ??= "";

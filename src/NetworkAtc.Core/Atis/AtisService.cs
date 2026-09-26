@@ -32,6 +32,9 @@ public sealed class AtisService
 
     public string Letter(string airport) => _profile().AtisLetters.GetValueOrDefault(airport.ToUpperInvariant(), "");
 
+    /// <summary>The METAR the ATIS of this airport uses now; null until one has come in.</summary>
+    public Metar? CurrentMetar(string airport) => _metar(airport.ToUpperInvariant());
+
     public void SetLetter(string airport, string letter)
     {
         airport = airport.ToUpperInvariant();
@@ -59,12 +62,14 @@ public sealed class AtisService
         return lines;
     }
 
-    /// <summary>The spoken ATIS for the station at this moment.</summary>
+    /// <summary>The spoken ATIS for the station at this moment, in the station's language (Russian or English).</summary>
     public string Speech(AtisSettings s)
     {
         string airport = s.Airport.ToUpperInvariant();
         _profile().ActiveRunways.TryGetValue(airport, out var runways);
-        return AtisText.Speech(s.SpokenName.Trim().Length > 0 ? s.SpokenName.Trim() : airport, Letter(airport), _clock(), runways,
-            _metar(airport), s.Remark);
+        string name = s.SpokenName.Trim().Length > 0 ? s.SpokenName.Trim() : airport;
+        return s.Language.StartsWith("ru", StringComparison.OrdinalIgnoreCase)
+            ? AtisText.SpeechRu(name, Letter(airport), _clock(), runways, _metar(airport), s.Remark)
+            : AtisText.Speech(name, Letter(airport), _clock(), runways, _metar(airport), s.Remark);
     }
 }

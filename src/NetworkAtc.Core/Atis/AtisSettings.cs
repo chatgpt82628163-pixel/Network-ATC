@@ -26,6 +26,8 @@ public sealed class AtisSettings
     public string Remark { get; set; } = "";
     /// <summary>Next letter by itself when a new METAR comes in.</summary>
     public bool AutoLetter { get; set; } = true;
+    /// <summary>Goes on the air by itself when the controller connects to the network.</summary>
+    public bool AutoConnect { get; set; }
     public AtisVoiceMode Voice { get; set; } = AtisVoiceMode.Speech;
     /// <summary>"ru" or "en" for the spoken ATIS.</summary>
     public string Language { get; set; } = "en";

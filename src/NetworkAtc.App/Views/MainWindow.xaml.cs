@@ -176,8 +176,12 @@ public partial class MainWindow : Window
         _atisService = new NetworkAtc.Core.Atis.AtisService(() => _profile, text => _commands.ExpandVariables(text), s => _workspace.Weather.Get(s));
         _atis = new AtisManager(_atisService, () => _profile, () => _session.IsConnected ? _session.Info : null,
             icao => Radar.Sector?.Airports.FirstOrDefault(a => a.Name.Equals(icao, StringComparison.OrdinalIgnoreCase))?.Position,
-            (text, error) => Dispatcher.BeginInvoke(() => { if (error) Error(text); else Info(text); }));
+            (text, error) => Dispatcher.BeginInvoke(() => { if (error) Error(text); else Info(text); }),
+            icao => _workspace.Weather.RefreshAsync(new[] { icao }));
         _atis.Changed += () => Dispatcher.BeginInvoke(UpdateAtisButton);
+        Radar.OwnAirspace = () => _session.IsConnected && _workspace.Ownership is { } ownership
+            ? ownership.AreasOf(_session.Me).Select(a => a.Polygon).ToList()
+            : [];
         _workspace.Weather.Updated += (_, m) =>
         {
             _es?.Metar(m.Station, m.Raw);
@@ -1046,7 +1050,8 @@ public partial class MainWindow : Window
         try
         {
             await _session.ConnectAsync(new AtcConnectInfo(cn.Host, cn.Port, cn.Cid, _protector.Unprotect(cn.ProtectedPassword),
-                cn.RealName, st.Rating, st.Callsign, khz, st.Facility, st.VisualRange, Radar.Sector?.Center ?? Radar.ViewCenter));
+                cn.RealName, st.Rating, st.Callsign, khz, st.Facility, st.VisualRange,
+                Radar.Sector is { } sector ? ReportedPosition.For(sector, st.Callsign, st.Frequency, st.Facility) : Radar.ViewCenter));
         }
         catch (FsdLoginException ex)
         {
@@ -1071,6 +1076,8 @@ public partial class MainWindow : Window
         {
             UpdateVoiceRadios();
             _voice.Start(info);
+            // The ATIS stations marked "connect together with me" go on the air with the controller.
+            _ = _atis.ConnectAutoAsync();
         }
         else if (!connected)
         {
@@ -1330,6 +1337,31 @@ public partial class MainWindow : Window
         menu.Items.Add(new Separator());
         menu.Items.Add(MenuEntry("Exit", Close, "Alt+F4"));
         menu.IsOpen = true;
+    }
+
+    private SectorSettingsWindow? _sectorsWindow;
+
+    /// <summary>SECTORS: the sector file, who owns which airspace (and the sectors taken by hand), the positions.</summary>
+    private void OnSectorsClick(object sender, RoutedEventArgs e)
+    {
+        if (_sectorsWindow is { IsLoaded: true })
+        {
+            _sectorsWindow.Activate();
+            return;
+        }
+        _sectorsWindow = new SectorSettingsWindow(_profile, _workspace, () => _sectorPath, () => _session.IsConnected ? _session.Me : "",
+            () =>
+            {
+                _workspace.UpdateOwnership();
+                _dirty = true;
+                Radar.InvalidateVisual();
+                SaveProfile();
+            },
+            () => OnOpenSectorClick(this, new RoutedEventArgs()),
+            () => LoadSector(_sectorPath))
+        { Owner = this };
+        _sectorsWindow.Closed += (_, _) => _sectorsWindow = null;
+        _sectorsWindow.Show();
     }
 
     /// <summary>PLUGINS: loaded Network-ATC plugins, their errors and the map layers taken from EuroScope plugins.</summary>
@@ -1669,6 +1701,7 @@ public partial class MainWindow : Window
             case "ActiveRunways": OnRunwaysClick(this, new RoutedEventArgs()); return true;
             case "ToggleSil": ShowWindow("sil"); return true;
             case "ToggleSel": ShowWindow("sel"); return true;
+            case "DeleteRuler": return Radar.DeleteHoveredMeasure();
             case "ClearSelection":
                 // Esc: first drop the selection, then the measuring lines.
                 if (Radar.Selected == null) Radar.ClearTools();
