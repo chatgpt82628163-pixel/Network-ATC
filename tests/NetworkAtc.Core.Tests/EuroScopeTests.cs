@@ -418,3 +418,24 @@ public class ProfileV3Tests
         Assert.Equal("F12", p.KeyBindings["AssumeOrAccept"]);
     }
 }
+
+public class ReportedPositionTests
+{
+    [Fact]
+    public void AirportPositionsReportTheAirportAndCentresTheirOwnSectors()
+    {
+        var s = Demo.Sector();
+        var uuee = s.Airports.First(a => a.Name == "UUEE").Position;
+        Assert.Equal(uuee, ReportedPosition.For(s, "UUEE_APP", "128.000", Facility.Approach));
+        Assert.Equal(uuee, ReportedPosition.For(s, "UUEE_TWR", "131.500", Facility.Tower));
+
+        // The centre reports the middle of the sector it owns first, not the middle of the whole file.
+        var ctr = ReportedPosition.For(s, "DEMO_CTR", "132.000", Facility.Centre);
+        var own = Airspace.Areas(s).First(a => a.Sector.Name == "DEMO_CTR").Polygon;
+        Assert.Equal((own.Min(p => p.Latitude) + own.Max(p => p.Latitude)) / 2, ctr.Latitude, 6);
+        Assert.Equal((own.Min(p => p.Longitude) + own.Max(p => p.Longitude)) / 2, ctr.Longitude, 6);
+
+        // Unknown to the sector file: its middle, as before.
+        Assert.Equal(s.Center, ReportedPosition.For(s, "XXXX_CTR", "135.000", Facility.Centre));
+    }
+}

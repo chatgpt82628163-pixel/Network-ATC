@@ -1050,7 +1050,8 @@ public partial class MainWindow : Window
         try
         {
             await _session.ConnectAsync(new AtcConnectInfo(cn.Host, cn.Port, cn.Cid, _protector.Unprotect(cn.ProtectedPassword),
-                cn.RealName, st.Rating, st.Callsign, khz, st.Facility, st.VisualRange, Radar.Sector?.Center ?? Radar.ViewCenter));
+                cn.RealName, st.Rating, st.Callsign, khz, st.Facility, st.VisualRange,
+                Radar.Sector is { } sector ? ReportedPosition.For(sector, st.Callsign, st.Frequency, st.Facility) : Radar.ViewCenter));
         }
         catch (FsdLoginException ex)
         {
