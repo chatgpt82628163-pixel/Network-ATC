@@ -52,6 +52,71 @@ public class AtisTests
     }
 
     [Fact]
+    public void RussianSpeechFromTheMetar()
+    {
+        var at = new DateTime(2026, 9, 24, 12, 30, 0);
+        var rwy = new RunwayUse { Departure = ["24R"], Arrival = ["24L"] };
+        var metar = MetarParser.Parse("UUEE 241230Z 27008G13MPS 9999 -SHRA BKN020CB OVC100 15/10 Q1013 NOSIG RMK QFE745/0993")!;
+        var ru = AtisText.SpeechRu("Шереметьево", "B", at, rwy, metar, "Рулёжная дорожка B закрыта");
+        Assert.StartsWith("Шереметьево, информация Браво, время 12 30.", ru);
+        Assert.Contains("Посадочная полоса 24 левая. Взлётная полоса 24 правая.", ru);
+        Assert.Contains("Ветер 270 градусов, 8 метров в секунду, порывы 13.", ru);
+        Assert.Contains("Видимость 10 километров и более.", ru);
+        Assert.Contains("Слабый ливневый дождь.", ru);
+        Assert.Contains("Облачность значительная 610 метров кучево-дождевая, сплошная 3050 метров.", ru);
+        Assert.Contains("Температура плюс 15, точка росы плюс 10.", ru);
+        Assert.Contains("Давление кью-эн-эйч 1013 гектопаскалей.", ru);
+        Assert.Contains("Давление аэродрома 745 миллиметров ртутного столба, 993 гектопаскаля.", ru);
+        Assert.Contains("Рулёжная дорожка B закрыта.", ru);
+        Assert.EndsWith("При первом выходе на связь сообщите о получении информации Браво.", ru);
+
+        var calm = AtisText.SpeechRu("UUEE", "C", at, new RunwayUse { Departure = ["24"], Arrival = ["24"] },
+            MetarParser.Parse("UUEE 241230Z 00000KT CAVOK M02/M05 Q1030")!, "");
+        Assert.Contains("Посадка и взлёт, полоса 24.", calm);
+        Assert.Contains("Штиль.", calm);
+        Assert.Contains("Кавок.", calm);
+        Assert.Contains("Температура минус 2, точка росы минус 5.", calm);
+        Assert.Contains("Давление кью-эн-эйч 1030 гектопаскалей.", calm);
+
+        // Knots are spoken in metres per second; cloud base in metres.
+        var knots = AtisText.SpeechRu("UUEE", "D", at, null, MetarParser.Parse("UUEE 241230Z 18010KT 4000 BR FEW005 08/07 Q0998")!, "");
+        Assert.Contains("Ветер 180 градусов, 5 метров в секунду.", knots);
+        Assert.Contains("Видимость 4000 метров.", knots);
+        Assert.Contains("Дымка.", knots);
+        Assert.Contains("Облачность незначительная 150 метров.", knots);
+        Assert.Contains("Давление кью-эн-эйч 998 гектопаскалей.", knots);
+        Assert.Contains("Гроза, сильный дождь.", AtisText.SpeechRu("UUEE", "E", at, null, MetarParser.Parse("UUEE 241230Z 21005MPS 3000 +TSRA BKN010CB 20/18 Q1005")!, ""));
+    }
+
+    [Fact]
+    public void RussianWordForms()
+    {
+        Assert.Equal("метр", AtisText.Plural(1, "метр", "метра", "метров"));
+        Assert.Equal("метра", AtisText.Plural(3, "метр", "метра", "метров"));
+        Assert.Equal("метров", AtisText.Plural(5, "метр", "метра", "метров"));
+        Assert.Equal("метров", AtisText.Plural(12, "метр", "метра", "метров"));
+        Assert.Equal("метр", AtisText.Plural(21, "метр", "метра", "метров"));
+        Assert.Equal("Браво", AtisText.PhoneticRussian("b"));
+        Assert.Equal("24 правая", AtisText.RunwayRussian("24R"));
+        Assert.Equal("6 левая", AtisText.RunwayRussian("06L"));
+    }
+
+    [Fact]
+    public void Service_SpeaksInTheStationLanguage()
+    {
+        var profile = new Profile();
+        var station = new AtisSettings { Airport = "UUEE", SpokenName = "Шереметьево", Language = "ru" };
+        profile.Atis.Add(station);
+        var service = new AtisService(() => profile, line => line, _ => Uuee, () => new DateTime(2026, 9, 24, 12, 30, 0));
+        service.SetLetter("UUEE", "A");
+        Assert.StartsWith("Шереметьево, информация Альфа", service.Speech(station));
+        station.Language = "en";
+        station.SpokenName = "Sheremetyevo";
+        Assert.StartsWith("Sheremetyevo information Alfa", service.Speech(station));
+        Assert.Same(Uuee, service.CurrentMetar("uuee"));
+    }
+
+    [Fact]
     public void Service_ExpandsTheTextPerAirport_AndMovesTheLetterOnANewMetar()
     {
         var profile = new Profile();

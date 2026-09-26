@@ -110,7 +110,12 @@ public sealed class SectorOwnership
         double.TryParse(b, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var y) &&
         Math.Abs(x - y) < 0.003;
 
-    public void Update(IEnumerable<OnlineStation> online)
+    /// <summary>
+    /// Works out the owners: for each sector the first online position of its owner list. With <paramref name="me"/>
+    /// (our callsign while online) the sectors named in <paramref name="mine"/> are ours whoever else is online,
+    /// the way a controller takes over a sector in EuroScope's ownership setup.
+    /// </summary>
+    public void Update(IEnumerable<OnlineStation> online, string? me = null, IEnumerable<string>? mine = null)
     {
         var byIdentifier = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         foreach (var st in online)
@@ -123,7 +128,15 @@ public sealed class SectorOwnership
                     _owners[area.Sector.Name] = cs;
                     break;
                 }
+        if (me is not { Length: > 0 } || mine == null) return;
+        var taken = new HashSet<string>(mine, StringComparer.OrdinalIgnoreCase);
+        foreach (var area in _areas)
+            if (taken.Contains(area.Sector.Name)) _owners[area.Sector.Name] = me;
     }
+
+    /// <summary>The sectors a controller owns after the last <see cref="Update"/>.</summary>
+    public IEnumerable<SectorArea> AreasOf(string callsign) =>
+        _areas.Where(a => _owners.TryGetValue(a.Sector.Name, out var cs) && cs.Equals(callsign, StringComparison.OrdinalIgnoreCase));
 
     /// <summary>Smallest sector containing the point at that altitude, or null.</summary>
     public SectorArea? AreaAt(GeoPoint p, int altitudeFeet) =>

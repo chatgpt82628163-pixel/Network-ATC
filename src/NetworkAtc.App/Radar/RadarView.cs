@@ -53,6 +53,13 @@ public sealed class RadarView : FrameworkElement
     private readonly List<(Anchor A, Anchor B)> _measures = [];
     private Anchor? _measureStart;
     private Point _rightDown;
+    /// <summary>Most rulers kept at once; the oldest goes when a new one is drawn.</summary>
+    private const int MaxMeasures = 20;
+    /// <summary>Where each ruler was drawn in the last frame: its line, its label and the × that deletes it.</summary>
+    private readonly List<(int Index, Point A, Point B, Rect Label, Rect Close)> _measureZones = [];
+    private int? _hoveredMeasure;
+    /// <summary>A ruler pressed with the right button: released over it, it is deleted.</summary>
+    private int? _pressedMeasure;
     private readonly Dictionary<string, TagTemplate> _templates = [];
     private (EsScreenObject Object, Point Start, int Button, bool Moved)? _objectPress;
     private EsScreenObject? _overObject;
@@ -68,6 +75,8 @@ public sealed class RadarView : FrameworkElement
 
     public SectorFile? Sector { get; private set; }
     public Profile Profile { get; set; } = new();
+    /// <summary>The airspace sectors the controller owns now, as polygons; tinted when the profile asks for it.</summary>
+    public Func<IReadOnlyList<IReadOnlyList<GeoPoint>>>? OwnAirspace { get; set; }
     public TagFields TagFields { get; set; } = new();
     public PluginRegistry? Plugins { get; set; }
     public Func<IReadOnlyList<Track>> Tracks { get; set; } = () => [];
@@ -201,6 +210,7 @@ public sealed class RadarView : FrameworkElement
             if (Sector != null) DrawSector(dc, Sector, theme);
         }
         if (Sector != null && Profile.IsLayerVisible("CENTERLINES")) DrawCenterlines(dc, Sector, theme);
+        DrawOwnAirspace(dc, theme);
         if (drawing?.Back is { } back) dc.DrawImage(back, full);
         DrawOverlays(dc);
         DrawRoutes(dc, theme);
@@ -562,30 +572,130 @@ public sealed class RadarView : FrameworkElement
         }
     }
 
-    /// <summary>Distance/bearing lines; between two aircraft also the closest point of approach.</summary>
+    /// <summary>
+    /// Rulers: distance and magnetic bearing both ways (true when the sector has no magnetic variation), between two
+    /// aircraft also the closest point of approach. Each finished ruler has a × on its label that deletes it.
+    /// </summary>
     private void DrawMeasures(DrawingContext dc, Theme theme)
     {
-        var all = _measures.ToList();
-        if (_measureStart != null) all.Add((_measureStart, new Anchor(HitTarget(_mouse), ToGeo(_mouse))));
-        foreach (var (a, b) in all)
+        _measureZones.Clear();
+        var all = _measures.Select((m, i) => (m.A, m.B, Index: (int?)i)).ToList();
+        if (_measureStart != null) all.Add((_measureStart, new Anchor(HitTarget(_mouse), ToGeo(_mouse)), null));
+        // Sector files give the variation with east negative, so magnetic = true + variation.
+        double variation = Sector?.MagneticVariation ?? 0;
+        string degrees = variation != 0 ? "°M" : "°";
+        double dip = VisualTreeHelper.GetDpi(this).PixelsPerDip;
+        foreach (var (a, b, index) in all)
         {
             Point pa = ToScreen(a.Position), pb = ToScreen(b.Position);
-            dc.DrawLine(Paint.Pen(theme.Measure, 1), pa, pb);
+            bool hot = index != null && index == _hoveredMeasure;
+            string color = hot ? theme.Accent : theme.Measure;
+            dc.DrawLine(Paint.Pen(color, hot ? 2 : 1), pa, pb);
+            dc.DrawEllipse(Paint.Brush(color), null, pa, 2.5, 2.5);
+            dc.DrawEllipse(Paint.Brush(color), null, pb, 2.5, 2.5);
+
             double nm = GeoMath.DistanceNm(a.Position, b.Position);
-            string text = $"{nm:0.0} NM  {GeoMath.BearingDeg(a.Position, b.Position):000}°";
+            int there = (int)Math.Round(((GeoMath.BearingDeg(a.Position, b.Position) + variation) % 360 + 360) % 360) % 360;
+            int back = (there + 180) % 360;
+            string text = $"{nm:0.0} NM  {there:000}{degrees} / {back:000}{degrees}";
             if (a.Track is { } ta && b.Track is { } tb && !ReferenceEquals(ta, tb))
             {
                 var (min, minutes) = NetworkAtc.Core.Session.CommandProcessor.ClosestApproach(ta, tb, 20);
                 if (minutes > 0.1) text += $"\nmin {min:0.0} NM · {minutes:0} min";
             }
-            DrawSmallText(dc, text, new Point((pa.X + pb.X) / 2 + 6, (pa.Y + pb.Y) / 2 - 6), theme.Measure, 11);
+
+            // The label on a small plate beside the middle of the line, readable over any map.
+            var ft = new FormattedText(text, CultureInfo.InvariantCulture, FlowDirection.LeftToRight, UiTypeface, 11, Paint.Brush(color), dip);
+            var at = new Point((pa.X + pb.X) / 2 + 10, (pa.Y + pb.Y) / 2 - ft.Height - 6);
+            double closeWidth = index != null ? 18 : 0;
+            var plate = new Rect(at.X - 6, at.Y - 3, ft.WidthIncludingTrailingWhitespace + 12 + closeWidth, ft.Height + 6);
+            dc.DrawRoundedRectangle(Paint.Brush(Paint.WithAlpha(theme.Panel, 0xE6)), Paint.Pen(Paint.WithAlpha(color, 0xA0), 1), plate, 4, 4);
+            dc.DrawText(ft, at);
+            if (index is not int i) continue;
+            var close = new Rect(plate.Right - 16, plate.Top + (plate.Height - 12) / 2, 12, 12);
+            var xPen = Paint.Pen(hot ? theme.Accent : theme.MutedText, 1.4);
+            dc.DrawLine(xPen, new Point(close.Left + 2, close.Top + 2), new Point(close.Right - 2, close.Bottom - 2));
+            dc.DrawLine(xPen, new Point(close.Right - 2, close.Top + 2), new Point(close.Left + 2, close.Bottom - 2));
+            _measureZones.Add((i, pa, pb, plate, close));
         }
+    }
+
+    /// <summary>The airspace the controller owns: a light tint of the accent colour with its border.</summary>
+    private void DrawOwnAirspace(DrawingContext dc, Theme theme)
+    {
+        if (!Profile.HighlightOwnAirspace || OwnAirspace?.Invoke() is not { Count: > 0 } areas) return;
+        var fill = Paint.Brush(Paint.WithAlpha(theme.Accent, 0x16));
+        var pen = Paint.Pen(Paint.WithAlpha(theme.Accent, 0x80), 1.2);
+        foreach (var polygon in areas)
+        {
+            if (polygon.Count < 3) continue;
+            var geometry = new StreamGeometry();
+            using (var ctx = geometry.Open())
+            {
+                ctx.BeginFigure(ToScreen(polygon[0]), true, true);
+                ctx.PolyLineTo(polygon.Skip(1).Select(p => ToScreen(p)).ToList(), true, false);
+            }
+            geometry.Freeze();
+            dc.DrawGeometry(fill, pen, geometry);
+        }
+    }
+
+    /// <summary>The ruler under a point: its label, or the line within 5 px; null when there is none.</summary>
+    private int? HitMeasure(Point p)
+    {
+        for (int k = _measureZones.Count - 1; k >= 0; k--)
+        {
+            var z = _measureZones[k];
+            if (z.Label.Contains(p) || DistanceToSegment(p, z.A, z.B) <= 5) return z.Index;
+        }
+        return null;
+    }
+
+    /// <summary>The ruler whose × is under a point.</summary>
+    private int? HitMeasureClose(Point p)
+    {
+        for (int k = _measureZones.Count - 1; k >= 0; k--)
+        {
+            var z = _measureZones[k];
+            var close = z.Close;
+            close.Inflate(3, 3);
+            if (close.Contains(p)) return z.Index;
+        }
+        return null;
+    }
+
+    private static double DistanceToSegment(Point p, Point a, Point b)
+    {
+        Vector ab = b - a;
+        double length2 = ab.LengthSquared;
+        double t = length2 == 0 ? 0 : Math.Clamp((p - a) * ab / length2, 0, 1);
+        return (p - (a + t * ab)).Length;
+    }
+
+    private void RemoveMeasure(int index)
+    {
+        if (index < 0 || index >= _measures.Count) return;
+        _measures.RemoveAt(index);
+        _hoveredMeasure = null;
+        _pressedMeasure = null;
+        Cursor = null;
+        InvalidateVisual();
+    }
+
+    /// <summary>Deletes the ruler under the mouse (the Delete key); false when there is none.</summary>
+    public bool DeleteHoveredMeasure()
+    {
+        if (_hoveredMeasure is not int i) return false;
+        RemoveMeasure(i);
+        return true;
     }
 
     /// <summary>Removes all measuring lines.</summary>
     public void ClearTools()
     {
         _measures.Clear();
+        _hoveredMeasure = null;
+        _pressedMeasure = null;
         InvalidateVisual();
     }
 
@@ -948,6 +1058,12 @@ public sealed class RadarView : FrameworkElement
         Focus();
         var p = e.GetPosition(this);
         if (PressObject(p, 1, e.ClickCount)) return;
+        if (HitMeasureClose(p) is int close)
+        {
+            RemoveMeasure(close);
+            e.Handled = true;
+            return;
+        }
         var tag = HitTag(p);
         if (tag != null)
         {
@@ -1013,11 +1129,13 @@ public sealed class RadarView : FrameworkElement
         }
         var hovered = HitTarget(_mouse);
         var field = HitField(_mouse);
-        if (!ReferenceEquals(hovered, Hovered) || field != _hoveredField)
+        int? measure = hovered == null && field == null ? HitMeasure(_mouse) : null;
+        if (!ReferenceEquals(hovered, Hovered) || field != _hoveredField || measure != _hoveredMeasure)
         {
             Hovered = hovered;
             _hoveredField = field;
-            Cursor = field != null || hovered != null ? Cursors.Hand : null;
+            _hoveredMeasure = measure;
+            Cursor = field != null || hovered != null || measure != null ? Cursors.Hand : null;
             InvalidateVisual();
         }
         ViewChanged?.Invoke(this, EventArgs.Empty);
@@ -1044,6 +1162,13 @@ public sealed class RadarView : FrameworkElement
             e.Handled = true;
             return;
         }
+        if (HitTag(p) == null && HitTarget(p) == null && HitMeasure(p) is int ruler)
+        {
+            // Right-click on a ruler deletes it (on release, so a press that moves away keeps it).
+            _pressedMeasure = ruler;
+            e.Handled = true;
+            return;
+        }
         if (HitTag(p) == null)
         {
             // Right-drag measures distance and bearing; from a target the line follows the aircraft.
@@ -1061,6 +1186,13 @@ public sealed class RadarView : FrameworkElement
             e.Handled = true;
             return;
         }
+        if (_pressedMeasure is int pressed)
+        {
+            _pressedMeasure = null;
+            if (HitMeasure(p) == pressed) RemoveMeasure(pressed);
+            e.Handled = true;
+            return;
+        }
         if (_measureStart is { } start)
         {
             _measureStart = null;
@@ -1068,7 +1200,7 @@ public sealed class RadarView : FrameworkElement
             if ((p - _rightDown).Length > 6)
             {
                 _measures.Add((start, new Anchor(HitTarget(p), ToGeo(p))));
-                if (_measures.Count > 8) _measures.RemoveAt(0);
+                if (_measures.Count > MaxMeasures) _measures.RemoveAt(0);
                 InvalidateVisual();
                 e.Handled = true;
                 return;

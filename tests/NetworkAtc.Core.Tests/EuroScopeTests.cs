@@ -82,6 +82,26 @@ public class AirspaceTests
     }
 
     [Fact]
+    public void ControllerCanTakeASectorByHand()
+    {
+        var s = Demo.Sector();
+        var own = new SectorOwnership(s);
+        var inTma = new GeoPoint(55.97, 37.41);
+        string tma = own.AreaAt(inTma, 5000)!.Sector.Name;
+        OnlineStation[] online = [new("DEMO_CTR", "132.000"), new("UUEE_APP", "128.000")];
+        // By the owner list the approach has the TMA; the centre takes it by hand.
+        own.Update(online, "DEMO_CTR", [tma]);
+        Assert.Equal("DEMO_CTR", own.OwnerAt(inTma, 5000));
+        Assert.Contains(own.AreasOf("DEMO_CTR"), a => a.Sector.Name == tma);
+        Assert.DoesNotContain(own.AreasOf("UUEE_APP"), a => a.Sector.Name == tma);
+        // Offline (no own callsign) the choice does not count; an unknown sector name changes nothing.
+        own.Update(online, null, [tma]);
+        Assert.Equal("UUEE_APP", own.OwnerAt(inTma, 5000));
+        own.Update(online, "DEMO_CTR", ["NO SUCH SECTOR"]);
+        Assert.Equal("UUEE_APP", own.OwnerAt(inTma, 5000));
+    }
+
+    [Fact]
     public void FindsNextController()
     {
         var s = Demo.Sector();

@@ -41,6 +41,7 @@
           <ToggleButton x:Name="LayersButton" Content="MAPS" Style="{StaticResource BarToggle}" Click="OnLayersClick" ToolTip="Map layers (F6)"/>
           <Button x:Name="ListsButton" Content="LISTS" Style="{StaticResource BarButton}" Click="OnListsClick"/>
           <Button Content="RWY" Style="{StaticResource BarButton}" Click="OnRunwaysClick" ToolTip="Active airports, runways and ATIS (Ctrl+R)"/>
+          <Button Content="SECTORS" Style="{StaticResource BarButton}" Click="OnSectorsClick" ToolTip="Sector file, airspace ownership and positions"/>
           <Button x:Name="VoiceButton" Style="{StaticResource BarButton}" Click="OnVoiceClick" ToolTip="Voice: frequencies, push-to-talk, audio">
             <StackPanel Orientation="Horizontal">
               <Ellipse x:Name="VoiceDot" Width="6" Height="6" Fill="{DynamicResource MutedBrush}" Margin="0,0,7,0"/>

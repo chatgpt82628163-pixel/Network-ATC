@@ -12,12 +12,15 @@ namespace NetworkAtc.App.Services;
 /// requests and, with a voice mode, its own voice connection playing the ATIS in a loop on the frequency.
 /// The spoken ATIS is made again whenever the letter or the weather changes.
 /// </summary>
+/// <param name="fetchMetar">Fetches the METAR of an airport now (a station going on the air should not wait for the
+/// next 10-minute weather refresh to have its weather).</param>
 public sealed class AtisManager(
     AtisService service,
     Func<Profile> profile,
     Func<AtcConnectInfo?> controller,
     Func<string, GeoPoint?> airportPosition,
-    Action<string, bool> message)
+    Action<string, bool> message,
+    Func<string, Task>? fetchMetar = null)
 {
     private sealed class Running(AtisSettings settings, AtisStation fsd)
     {
@@ -72,6 +75,8 @@ public sealed class AtisManager(
         lock (_running) _running[s.Callsign] = running;
         message($"{s.Callsign} connected on {Frequency.Format(khz)}", false);
         Changed?.Invoke();
+        // The weather for the text and the voice now; when it arrives the voice is made again (Refresh).
+        if (fetchMetar != null && service.CurrentMetar(s.Airport) == null) _ = fetchMetar(s.Airport.ToUpperInvariant());
 
         if (s.Voice == AtisVoiceMode.None) return;
         var voice = new AtisVoiceStation();
@@ -148,6 +153,26 @@ public sealed class AtisManager(
         await r.Fsd.DisconnectAsync();
         Remove(s.Callsign);
         message($"{s.Callsign} disconnected", false);
+    }
+
+    /// <summary>
+    /// Puts on the air the stations marked "connect with me", after the controller has connected. A station that
+    /// cannot connect is reported and the others still go on.
+    /// </summary>
+    public async Task ConnectAutoAsync()
+    {
+        foreach (var s in profile().Atis.Where(a => a.AutoConnect).ToList())
+        {
+            if (IsConnected(s)) continue;
+            try
+            {
+                await ConnectAsync(s);
+            }
+            catch (Exception ex) when (ex is not OutOfMemoryException)
+            {
+                message($"{s.Callsign}: not connected: {ex.Message}", true);
+            }
+        }
     }
 
     public async Task DisconnectAllAsync()

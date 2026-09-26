@@ -220,6 +220,14 @@ public partial class AtisWindow : Window
         _connect.Click += async (_, _) => await ToggleConnection(s);
         _status = new TextBlock { VerticalAlignment = VerticalAlignment.Center, Style = (Style)FindResource("Muted") };
         Editor.Children.Add(new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 14, 0, 0), Children = { _connect, new Border { Width = 12 }, _status } });
+        var together = new CheckBox
+        {
+            Content = "Connect this ATIS together with me when I connect to the network",
+            IsChecked = s.AutoConnect,
+            Margin = new Thickness(0, 10, 0, 0),
+        };
+        together.Click += (_, _) => { s.AutoConnect = together.IsChecked == true; _save(); };
+        Editor.Children.Add(together);
 
         UpdatePreview();
         UpdateStatus();
