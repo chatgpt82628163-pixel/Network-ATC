@@ -1049,9 +1049,11 @@ public partial class MainWindow : Window
         ConnectButton.IsEnabled = false;
         try
         {
+            var at = Radar.Sector is { } sector ? ReportedPosition.For(sector, st.Callsign, st.Frequency, st.Facility) : Radar.ViewCenter;
+            // The range counts from the border of the position's airspace: traffic and radio reach cover all of it.
+            int coverage = ReportedPosition.CoverageNm(Radar.Sector, st.Callsign, st.Frequency, st.Facility, at, st.VisualRange);
             await _session.ConnectAsync(new AtcConnectInfo(cn.Host, cn.Port, cn.Cid, _protector.Unprotect(cn.ProtectedPassword),
-                cn.RealName, st.Rating, st.Callsign, khz, st.Facility, st.VisualRange,
-                Radar.Sector is { } sector ? ReportedPosition.For(sector, st.Callsign, st.Frequency, st.Facility) : Radar.ViewCenter));
+                cn.RealName, st.Rating, st.Callsign, khz, st.Facility, coverage, at));
         }
         catch (FsdLoginException ex)
         {
@@ -1096,7 +1098,7 @@ public partial class MainWindow : Window
     private void UpdateVoiceRadios()
     {
         if (_session.Info is not { } info) return;
-        var sites = VoicePlan.Sites([info.Center], VoicePlan.FallbackSite(Radar.Sector, _profile.ActiveAirports));
+        var sites = VoicePlan.Sites([info.Center], VoicePlan.FallbackSite(Radar.Sector, _profile.ActiveAirports), info.VisualRange);
         _voice.Update(VoicePlan.Radios(info.FrequencyKhz, VoicePlan.CanTransmit(info), _profile.Voice, sites.Count), sites);
     }
 

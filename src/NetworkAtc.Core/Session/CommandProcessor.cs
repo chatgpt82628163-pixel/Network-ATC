@@ -338,10 +338,15 @@ public sealed partial class CommandProcessor(AtcSession session, Func<Profile> p
             }
             case "range":
             {
-                if (args.Count == 0 || !int.TryParse(args[0], out var nm) || nm is < 1 or > 600) return "Range 1–600 NM";
+                if (args.Count == 0 || !int.TryParse(args[0], out var nm) || nm is < 1 or > FacilityExtensions.MaxRangeNm)
+                    return $"Range 1–{FacilityExtensions.MaxRangeNm} NM";
                 profile().Station.VisualRange = nm;
-                if (session.Info is { } info) await session.UpdateStationAsync(info.FrequencyKhz, nm, info.Center).ConfigureAwait(false);
-                return $"Visibility range {nm} NM";
+                // Counted from the border of the position's airspace, as when connecting.
+                if (session.Info is { } info)
+                    await session.UpdateStationAsync(info.FrequencyKhz,
+                        ReportedPosition.CoverageNm(Workspace?.Sector, info.Callsign, Frequency.Format(info.FrequencyKhz), info.Facility, info.Center, nm),
+                        info.Center).ConfigureAwait(false);
+                return $"Range {nm} NM from the sector border";
             }
             case "demo":
                 if (_demo != null)

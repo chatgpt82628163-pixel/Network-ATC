@@ -64,15 +64,15 @@ public partial class ConnectWindow : Window
         var f = Facilities[FacilityBox.SelectedIndex].Value;
         int min = f.MinimumRating();
         if (RatingBox.SelectedIndex + 1 < min) RatingBox.SelectedIndex = min - 1;
-        if (min > 1) RangeBox.Text = "600";
+        RangeBox.Text = f.DefaultRangeNm().ToString();
     }
 
     private void OnCallsignChanged(object sender, TextChangedEventArgs e)
     {
         var f = AtcSession.FacilityFromCallsign(CallsignBox.Text);
         if (f != Facility.Observer) FacilityBox.SelectedIndex = Array.FindIndex(Facilities, x => x.Value == f);
-        // Typical visibility ranges by facility.
-        RangeBox.Text = f switch { Facility.Delivery or Facility.Ground => "20", Facility.Tower => "50", Facility.Approach => "150", Facility.Centre => "400", _ => RangeBox.Text };
+        // Usual range of the facility, counted from the border of its airspace.
+        if (f != Facility.Observer) RangeBox.Text = f.DefaultRangeNm().ToString();
     }
 
     private void OnOk(object sender, RoutedEventArgs e)
@@ -80,7 +80,11 @@ public partial class ConnectWindow : Window
         string callsign = CallsignBox.Text.Trim().ToUpperInvariant();
         if (!AtcSession.IsValidCallsign(callsign)) { ErrorText.Text = "Callsign: 2–12 Latin letters, digits and _"; return; }
         if (!Frequency.TryParse(FrequencyBox.Text, out var khz)) { ErrorText.Text = "Frequency 118.000–136.975"; return; }
-        if (!int.TryParse(RangeBox.Text, out var range) || range is < 1 or > 600) { ErrorText.Text = "Range 1–600 NM"; return; }
+        if (!int.TryParse(RangeBox.Text, out var range) || range is < 1 or > FacilityExtensions.MaxRangeNm)
+        {
+            ErrorText.Text = $"Range 1–{FacilityExtensions.MaxRangeNm} NM";
+            return;
+        }
         var server = ServerBox.Text.Trim().Split(':');
         int port = 6809;
         if (server[0].Length == 0 || server.Length > 2 || server.Length == 2 && !int.TryParse(server[1], out port))

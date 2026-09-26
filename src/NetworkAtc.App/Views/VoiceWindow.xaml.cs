@@ -54,6 +54,7 @@ public partial class VoiceWindow : Window
         _ptt = PttBinding.Parse(v.PushToTalk);
         ShowPtt();
         EnabledBox.IsChecked = v.Enabled;
+        RadioNoiseBox.IsChecked = v.RadioNoise;
         PortBox.Text = v.Port.ToString();
 
         _voice.Changed += ShowState;
@@ -235,6 +236,7 @@ public partial class VoiceWindow : Window
         v.OutputVolume = Math.Round(OutputVolumeSlider.Value, 2);
         v.PushToTalk = _ptt.ToString();
         v.Enabled = EnabledBox.IsChecked == true;
+        v.RadioNoise = RadioNoiseBox.IsChecked == true;
         v.Port = port;
         DialogResult = true;
     }
