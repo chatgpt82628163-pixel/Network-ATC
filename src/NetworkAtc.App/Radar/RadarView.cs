@@ -23,7 +23,8 @@ namespace NetworkAtc.App.Radar;
 public sealed class RadarView : FrameworkElement
 {
     private static readonly Typeface UiTypeface = new(AppFonts.Family(AppFonts.Ui), FontStyles.Normal, FontWeights.Normal, FontStretches.Normal);
-    private const double MinNmPerPixel = 0.002, MaxNmPerPixel = 5;
+    // Down to about 0.4 m per pixel: close enough to see aircraft to scale on the ground radar.
+    private const double MinNmPerPixel = 0.0002, MaxNmPerPixel = 5;
 
     private Projection _projection = new(new GeoPoint(55.97, 37.41));
     private double _cx, _cy;               // view center, plane NM
@@ -225,14 +226,15 @@ public sealed class RadarView : FrameworkElement
     /// <summary>The layer the sector map is drawn into (under this element); null draws the map here, every frame.</summary>
     public MapLayer? Map { get; set; }
 
-    /// <summary>How long the view must stay still before the moved map picture is redrawn crisply.</summary>
-    private static readonly TimeSpan MapSettle = TimeSpan.FromMilliseconds(140);
+    /// <summary>How long a dragged view must stay still before the map is redrawn around the new center.</summary>
+    private static readonly TimeSpan MapSettle = TimeSpan.FromMilliseconds(250);
     private readonly System.Windows.Threading.DispatcherTimer _mapSettleTimer = new() { Interval = MapSettle };
     private (double Cx, double Cy, double NmPerPixel, double W, double H) _mapDrawnView, _lastView;
     private DateTime _lastViewChange;
     private string _mapContentKey = "";
-    /// <summary>While the map is drawn, things this far outside the screen are drawn too, so panning shows them.</summary>
+    /// <summary>While the map is drawn, things this far outside the screen are drawn too, so dragging shows them.</summary>
     private double _cullMargin;
+    private double _mapDrawnMargin;
 
     private string MapContentKey(Theme theme)
     {
@@ -246,8 +248,9 @@ public sealed class RadarView : FrameworkElement
     }
 
     /// <summary>
-    /// Keeps the map layer in step with the view: while the view moves the last picture is only shifted and scaled
-    /// (cheap, on the graphics card); once it has been still for a moment, or the map itself changed, it is redrawn.
+    /// Keeps the map layer in step with the view. The map stays vector drawing, so it is always sharp: a zoom, a new
+    /// window size or a change of the map redraws it at once; a drag only shifts it (lines keep their width), and it is
+    /// redrawn around the new center when the view stops or the drag nears the edge of what was drawn.
     /// </summary>
     private void UpdateMap(Theme theme)
     {
@@ -259,18 +262,17 @@ public sealed class RadarView : FrameworkElement
             _lastViewChange = now;
         }
         string key = MapContentKey(theme);
-        bool sizeChanged = view.ActualWidth != _mapDrawnView.W || view.ActualHeight != _mapDrawnView.H;
-        if (key != _mapContentKey || sizeChanged || (view != _mapDrawnView && now - _lastViewChange >= MapSettle))
+        if (view == _mapDrawnView && key == _mapContentKey) return;
+        // Pixels the view moved since the map was drawn (same zoom): screen = (x - cx) / nmPerPixel + W / 2.
+        double dx = (_mapDrawnView.Cx - _cx) / _nmPerPixel, dy = (_cy - _mapDrawnView.Cy) / _nmPerPixel;
+        bool sameZoomAndSize = _nmPerPixel == _mapDrawnView.NmPerPixel && ActualWidth == _mapDrawnView.W && ActualHeight == _mapDrawnView.H;
+        bool withinDrawn = Math.Abs(dx) < _mapDrawnMargin * 0.8 && Math.Abs(dy) < _mapDrawnMargin * 0.8;
+        if (key != _mapContentKey || !sameZoomAndSize || !withinDrawn || now - _lastViewChange >= MapSettle)
         {
             RenderMap(theme, key, view);
             return;
         }
-        if (view == _mapDrawnView) return;
-        // Drawn: screen = k0 * (x, -y) + b0; now: k1 * (x, -y) + b1. So now = s * drawn + (b1 - s * b0), s = k1 / k0.
-        double k0 = 1 / _mapDrawnView.NmPerPixel, k1 = 1 / _nmPerPixel, s = k1 / k0;
-        double b0x = _mapDrawnView.W / 2 - _mapDrawnView.Cx * k0, b0y = _mapDrawnView.H / 2 + _mapDrawnView.Cy * k0;
-        double b1x = ActualWidth / 2 - _cx * k1, b1y = ActualHeight / 2 + _cy * k1;
-        Map!.Follow(new Matrix(s, 0, 0, s, b1x - s * b0x, b1y - s * b0y));
+        Map!.Follow(dx, dy);
         if (!_mapSettleTimer.IsEnabled)
         {
             _mapSettleTimer.Tick -= OnMapSettle;
@@ -304,6 +306,7 @@ public sealed class RadarView : FrameworkElement
         }
         _mapContentKey = key;
         _mapDrawnView = view;
+        _mapDrawnMargin = HideOwnContent ? double.MaxValue : Math.Max(ActualWidth, ActualHeight) * 0.6;
     }
 
     private string MapColor(string? fileColor, string themeColor) =>
@@ -339,6 +342,8 @@ public sealed class RadarView : FrameworkElement
            .Append(theme.ArtccHigh).Append(theme.Artcc).Append(theme.Sid).Append(theme.Star).Append(theme.SectorLine).Append(theme.Runway);
         foreach (var layer in MapLayers) key.Append(Profile.IsLayerVisible(layer) ? '1' : '0');
         foreach (var layer in s.CustomLayers) key.Append('|').Append(layer).Append(Profile.IsLayerVisible(layer) ? '1' : '0');
+        foreach (var (layer, items) in Profile.MapItems.OrderBy(kv => kv.Key, StringComparer.OrdinalIgnoreCase))
+            key.Append('|').Append(layer).Append(':').Append(string.Join('\u0001', items));
         return key.ToString();
     }
 
@@ -348,13 +353,24 @@ public sealed class RadarView : FrameworkElement
         return new Point(x, y);
     }
 
+    /// <summary>Elements shown per layer (from a EuroScope .asr); a layer not in it shows everything.</summary>
+    private Dictionary<string, HashSet<string>> _itemFilter = new(StringComparer.OrdinalIgnoreCase);
+
+    private bool Shown(string layer, string name) =>
+        !_itemFilter.TryGetValue(layer, out var names) || names.Contains(name.Trim());
+
+    private bool FreeTextShown(SectorLabel l) =>
+        !_itemFilter.TryGetValue("FREETEXT", out var names) || names.Contains(l.Group) || names.Contains($"{l.Group}\\{l.Text}");
+
     private List<MapPiece> BuildMap(SectorFile s, Theme theme)
     {
         var pieces = new List<MapPiece>();
+        _itemFilter = Profile.MapItems.ToDictionary(kv => kv.Key, kv => new HashSet<string>(kv.Value.Select(v => v.Trim()), StringComparer.OrdinalIgnoreCase),
+            StringComparer.OrdinalIgnoreCase);
 
         if (Profile.IsLayerVisible("REGIONS"))
         {
-            foreach (var group in s.Regions.Where(r => r.Points.Count > 2).GroupBy(r => MapColor(r.Color, theme.Region)))
+            foreach (var group in s.Regions.Where(r => r.Points.Count > 2 && Shown("REGIONS", r.Name)).GroupBy(r => MapColor(r.Color, theme.Region)))
             {
                 var geo = new StreamGeometry { FillRule = FillRule.Nonzero };
                 using (var ctx = geo.Open())
@@ -394,7 +410,7 @@ public sealed class RadarView : FrameworkElement
         {
             if (!Profile.IsLayerVisible(layer) || !s.Lines.TryGetValue(layer, out var lines)) continue;
             string layerColor = s.LayerColors.TryGetValue(layer, out var lc) && Profile.UseSectorFileColors ? lc : color;
-            AddLines(lines, l => MapColor(l.Color, layerColor), dashed);
+            AddLines(lines.Where(l => Shown(layer, l.Name)), l => MapColor(l.Color, layerColor), dashed);
         }
         // Layers that only exist in Network-ATC sectors always use their own colors.
         foreach (var layer in s.CustomLayers)
@@ -512,7 +528,7 @@ public sealed class RadarView : FrameworkElement
                 DrawSmallText(dc, l.Text, ToScreen(l.Position), own ? l.Color ?? s.LayerColors.GetValueOrDefault(l.Group, theme.Label) : MapColor(l.Color, theme.Label));
         }
         if (Profile.IsLayerVisible("FREETEXT"))
-            foreach (var l in s.FreeTexts) DrawSmallText(dc, l.Text, ToScreen(l.Position), theme.Label);
+            foreach (var l in s.FreeTexts.Where(FreeTextShown)) DrawSmallText(dc, l.Text, ToScreen(l.Position), theme.Label);
     }
 
     /// <summary>Extended centerlines of the active arrival runways, 15 NM with a tick every 5 NM.</summary>
@@ -762,9 +778,15 @@ public sealed class RadarView : FrameworkElement
             if (Profile.Targets.PredictionMinutes > 0 && !t.OnGround && t.GroundSpeed > 30)
                 dc.DrawLine(Paint.Pen(theme.PredictionLine, 1), p, ToScreen(t.Predict(Profile.Targets.PredictionMinutes)));
 
-            // Symbol: diamond for untracked, filled square for tracked, dot on the ground.
+            // Symbol: diamond for untracked, filled square for tracked, dot on the ground; on the ground, zoomed in,
+            // the aircraft itself to scale, turned to its heading (ground radar).
             double s = Profile.Targets.SymbolSize / 2;
-            if (t.OnGround)
+            if (t.OnGround && Profile.EsDisplayType.Length == 0 && Silhouette(t) is { } shape)
+            {
+                dc.DrawGeometry(Paint.Brush(Paint.WithAlpha(symbolColor, 170)), Paint.Pen(symbolColor, 1), shape.Geometry);
+                s = Math.Max(s, shape.Radius);
+            }
+            else if (t.OnGround)
             {
                 dc.DrawEllipse(Paint.Brush(symbolColor), null, p, s * 0.6, s * 0.6);
             }
@@ -797,6 +819,29 @@ public sealed class RadarView : FrameworkElement
 
             DrawTag(dc, t, p, theme, hovered, conflict, emergency, dip);
         }
+    }
+
+    /// <summary>The aircraft to scale when it is at least 8 pixels long, with the radius of the circle around it.</summary>
+    private (Geometry Geometry, double Radius)? Silhouette(Track t)
+    {
+        var (length, span) = AircraftShapes.Size(t.AircraftType, t.WakeCategory);
+        double pxPerMetre = 1 / (1852 * _nmPerPixel);
+        if (length * pxPerMetre < 8) return null;
+        var p = ToScreen(t.Position);
+        double h = t.Heading * Math.PI / 180;
+        // Forward along the heading (north is up), right perpendicular to it.
+        var forward = new Vector(Math.Sin(h), -Math.Cos(h)) * pxPerMetre;
+        var right = new Vector(Math.Cos(h), Math.Sin(h)) * pxPerMetre;
+        var outline = AircraftShapes.Outline(length, span);
+        var g = new StreamGeometry();
+        using (var ctx = g.Open())
+        {
+            ctx.BeginFigure(p + forward * outline[0].Forward + right * outline[0].Right, true, true);
+            for (int i = 1; i < outline.Count; i++)
+                ctx.LineTo(p + forward * outline[i].Forward + right * outline[i].Right, true, true);
+        }
+        g.Freeze();
+        return (g, Math.Max(length, span) / 2 * pxPerMetre);
     }
 
     private TrackState StateOf(Track t) =>
