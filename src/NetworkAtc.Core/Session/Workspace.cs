@@ -1,3 +1,4 @@
+using System.Runtime.CompilerServices;
 using NetworkAtc.Core.Customization;
 using NetworkAtc.Core.Fsd;
 using NetworkAtc.Core.Geo;
@@ -22,6 +23,23 @@ public sealed class Workspace : IDisposable
     private readonly Func<Profile> _profile;
     private SectorFile? _sector;
     private SectorOwnership? _ownership;
+    private int _ownersVersion;
+
+    // Where an aircraft will be over the next minutes, tested against every sector, is too much to work out again for
+    // each aircraft in every radar frame and every list refresh. The answers are kept per aircraft until it moves,
+    // turns, changes speed or level, or the sector owners change.
+    private sealed record AirspaceKey(GeoPoint Position, double Heading, int GroundSpeed, int Altitude, int? Cleared,
+        int Owners, string Me, string Owner);
+
+    private sealed class AirspaceAnswers
+    {
+        public AirspaceKey? Key;
+        public bool? InOrEntering;
+        public (double? Minutes, bool Known) Entry;
+        public (string? Callsign, bool Known) Next;
+    }
+
+    private readonly ConditionalWeakTable<Track, AirspaceAnswers> _answers = new();
 
     public Workspace(AtcSession session, Func<Profile> profile)
     {
@@ -50,6 +68,7 @@ public sealed class Workspace : IDisposable
     /// <summary>Recomputes sector owners from the controllers online and ourselves.</summary>
     public void UpdateOwnership()
     {
+        Interlocked.Increment(ref _ownersVersion);
         if (_ownership == null) return;
         var online = _session.Controllers.Select(c => new OnlineStation(c.Callsign, Frequency.Format(c.FrequencyKhz))).ToList();
         online.Add(new OnlineStation(_session.Me, _session.Info is { } i ? Frequency.Format(i.FrequencyKhz) : _profile().Station.Frequency));
@@ -66,8 +85,35 @@ public sealed class Workspace : IDisposable
         return _ownership?.PositionOf(new OnlineStation(callsign, freq))?.Identifier is { Length: > 0 } id ? id : callsign;
     }
 
+    /// <summary>The answers kept for the aircraft as it is now (emptied when anything they depend on changed).</summary>
+    private T Answer<T>(Track t, Func<AirspaceAnswers, T> read, Action<AirspaceAnswers> work)
+    {
+        var a = _answers.GetValue(t, _ => new AirspaceAnswers());
+        var key = new AirspaceKey(t.Position, t.Heading, t.GroundSpeed, t.Altitude, t.ClearedAltitude, Volatile.Read(ref _ownersVersion),
+            _session.Me, t.Owner);
+        lock (a)
+        {
+            if (a.Key != key)
+            {
+                a.Key = key;
+                a.InOrEntering = null;
+                a.Entry = default;
+                a.Next = default;
+            }
+            work(a);
+            return read(a);
+        }
+    }
+
     /// <summary>The controller the aircraft should go to next, or null.</summary>
-    public string? NextController(Track t) => _ownership?.NextController(t, t.Owner.Length > 0 ? t.Owner : _session.Me);
+    public string? NextController(Track t)
+    {
+        if (_ownership is not { } ownership) return null;
+        return Answer(t, a => a.Next.Callsign, a =>
+        {
+            if (!a.Next.Known) a.Next = (ownership.NextController(t, t.Owner.Length > 0 ? t.Owner : _session.Me), true);
+        });
+    }
 
     /// <summary>In or entering our airspace, or departing/arriving at one of our active airports.</summary>
     public bool IsConcerned(Track t)
@@ -78,7 +124,8 @@ public sealed class Workspace : IDisposable
             if (airports.Contains(t.Departure, StringComparer.OrdinalIgnoreCase) && NearAirport(t, t.Departure, 40)) return true;
             if (airports.Contains(t.Destination, StringComparer.OrdinalIgnoreCase) && NearAirport(t, t.Destination, 60)) return true;
         }
-        return _ownership?.IsInOrEntering(t, _session.Me) == true;
+        if (_ownership is not { } ownership) return false;
+        return Answer(t, a => a.InOrEntering == true, a => a.InOrEntering ??= ownership.IsInOrEntering(t, _session.Me));
     }
 
     private bool NearAirport(Track t, string icao, double nm) =>
@@ -175,6 +222,17 @@ public sealed class Workspace : IDisposable
 
     /// <summary>Minutes until the aircraft enters airspace we own (0 when already inside), or null.</summary>
     public double? MinutesToEntry(Track t, int lookahead = 10)
+    {
+        if (_ownership == null) return null;
+        if (lookahead == 10)
+            return Answer(t, a => a.Entry.Minutes, a =>
+            {
+                if (!a.Entry.Known) a.Entry = (WorkOutMinutesToEntry(t, lookahead), true);
+            });
+        return WorkOutMinutesToEntry(t, lookahead);
+    }
+
+    private double? WorkOutMinutesToEntry(Track t, int lookahead)
     {
         if (_ownership == null) return null;
         int alt = t.ClearedAltitude ?? t.Altitude;

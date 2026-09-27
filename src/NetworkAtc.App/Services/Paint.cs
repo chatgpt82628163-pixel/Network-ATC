@@ -8,17 +8,19 @@ public static class Paint
 {
     private static readonly Dictionary<string, SolidColorBrush> Brushes = new(StringComparer.OrdinalIgnoreCase);
     private static readonly Dictionary<(string, double, bool), Pen> Pens = [];
+    // The radar asks for the same few colours many times in every frame; parsing them is slow.
+    private static readonly Dictionary<string, Color> ParsedColors = new(StringComparer.OrdinalIgnoreCase);
+    private static readonly Dictionary<(string, byte), string> Faded = [];
 
     public static Color ToColor(string? hex)
     {
-        try
-        {
-            if (!string.IsNullOrWhiteSpace(hex)) return (Color)ColorConverter.ConvertFromString(hex.Trim());
-        }
-        catch (FormatException)
-        {
-        }
-        return Colors.Magenta; // makes a typo in a theme obvious
+        if (string.IsNullOrWhiteSpace(hex)) return Colors.Magenta;
+        if (ParsedColors.TryGetValue(hex, out var known)) return known;
+        Color c;
+        try { c = (Color)ColorConverter.ConvertFromString(hex.Trim()); }
+        catch (FormatException) { c = Colors.Magenta; } // makes a typo in a theme obvious
+        if (ParsedColors.Count > 2000) ParsedColors.Clear();
+        return ParsedColors[hex] = c;
     }
 
     public static bool IsValid(string? hex)
@@ -48,7 +50,9 @@ public static class Paint
 
     public static string WithAlpha(string hex, byte alpha)
     {
+        if (Faded.TryGetValue((hex, alpha), out var faded)) return faded;
         var c = ToColor(hex);
-        return $"#{alpha:X2}{c.R:X2}{c.G:X2}{c.B:X2}";
+        if (Faded.Count > 4000) Faded.Clear();
+        return Faded[(hex, alpha)] = $"#{alpha:X2}{c.R:X2}{c.G:X2}{c.B:X2}";
     }
 }

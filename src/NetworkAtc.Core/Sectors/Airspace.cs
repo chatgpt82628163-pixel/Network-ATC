@@ -6,8 +6,15 @@ namespace NetworkAtc.Core.Sectors;
 /// <summary>An .ese sector with its border as a closed polygon.</summary>
 public sealed record SectorArea(AirspaceSector Sector, IReadOnlyList<GeoPoint> Polygon)
 {
+    // The box around the border: most points are far outside it, and it is much quicker to test than the border.
+    private readonly (double South, double North, double West, double East) _box = (
+        Polygon.Count > 0 ? Polygon.Min(p => p.Latitude) : 0, Polygon.Count > 0 ? Polygon.Max(p => p.Latitude) : 0,
+        Polygon.Count > 0 ? Polygon.Min(p => p.Longitude) : 0, Polygon.Count > 0 ? Polygon.Max(p => p.Longitude) : 0);
+
     public bool Contains(GeoPoint p, int altitudeFeet) =>
-        altitudeFeet >= Sector.Floor && altitudeFeet < Sector.Ceiling && Airspace.InPolygon(p, Polygon);
+        altitudeFeet >= Sector.Floor && altitudeFeet < Sector.Ceiling
+        && p.Latitude >= _box.South && p.Latitude <= _box.North && p.Longitude >= _box.West && p.Longitude <= _box.East
+        && Airspace.InPolygon(p, Polygon);
 }
 
 /// <summary>A controller that is online (or ourselves) as the sector logic sees it.</summary>

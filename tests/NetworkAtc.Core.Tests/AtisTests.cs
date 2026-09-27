@@ -32,7 +32,7 @@ public class AtisTests
         var en = AtisText.Speech("Sheremetyevo", "B", new DateTime(2026, 9, 24, 12, 30, 0), rwy, Uuee, "Taxiway B closed");
         Assert.StartsWith("Sheremetyevo information Bravo, time 1230.", en);
         Assert.Contains("Landing runway 24 left. Departure runway 24 right.", en);
-        Assert.Contains("Wind 270 degrees 16 knots.", en);
+        Assert.Contains("Wind 270 degrees 8 meters per second.", en);
         Assert.Contains("Visibility 10 kilometers or more.", en);
         Assert.Contains("light showers of rain.", en);
         Assert.Contains("Clouds broken 2000 feet cumulonimbus, overcast 10000 feet.", en);
@@ -124,7 +124,7 @@ public class AtisTests
         var metars = new Dictionary<string, Metar> { ["UUEE"] = Uuee };
         var service = new AtisService(() => profile,
             line => line.Replace("$atiscode(UUEE)", profile.AtisLetters.GetValueOrDefault("UUEE", "")).Replace("$metar(UUEE)", metars["UUEE"].Raw)
-                        .Replace("$time", "1230").Replace("$deprwy(UUEE)", "24R").Replace("$arrrwy(UUEE)", "24L"),
+                        .Replace("$time(UUEE)", "1230").Replace("$deprwy(UUEE)", "24R").Replace("$arrrwy(UUEE)", "24L"),
             s => metars.GetValueOrDefault(s));
         var changed = new List<string>();
         service.LetterChanged += (_, a) => changed.Add(a);
@@ -146,6 +146,56 @@ public class AtisTests
         Assert.Equal("B", service.Letter("UUEE"));
         Assert.Equal(["UUEE", "UUEE"], changed);
         Assert.Contains("information Bravo", service.Speech(profile.Atis[0]));
+    }
+
+    // A controller's report: the ATIS said the time now (0114) instead of the METAR's (0100), and the wind in knots.
+    private const string Khabarovsk = "UNKL 270100Z 29006MPS 9999 SCT036CB 04/03 Q1016 R29/290150 NOSIG";
+
+    [Fact]
+    public void AtisTime_IsTheMetarTime_AndTheWindKeepsItsUnit()
+    {
+        var now = new DateTime(2026, 9, 27, 1, 14, 0, DateTimeKind.Utc);
+        var metar = MetarParser.Parse(Khabarovsk, now)!;
+        Assert.Equal(new DateTime(2026, 9, 27, 1, 0, 0, DateTimeKind.Utc), metar.ObservationTime);
+        Assert.Equal((290, 6, true, "290/06MPS"), (metar.WindDirection, metar.WindSpeed, metar.WindInMps, metar.Wind));
+
+        var profile = new Profile();
+        var station = new AtisSettings { Airport = "UNKL", SpokenName = "Khabarovsk" };
+        profile.Atis.Add(station);
+        var service = new AtisService(() => profile, line => line, _ => metar, () => now);
+        service.SetLetter("UNKL", "A");
+        string en = service.Speech(station);
+        Assert.StartsWith("Khabarovsk information Alfa, time 0100.", en);
+        Assert.Contains("Wind 290 degrees 6 meters per second.", en);
+        station.Language = "ru";
+        Assert.Contains("время 01 00", service.Speech(station));
+
+        // No METAR yet: the clock.
+        var waiting = new AtisService(() => profile, line => line, _ => null, () => now);
+        Assert.Contains("время 01 14", waiting.Speech(station));
+
+        // The text: $time is the METAR's; a unit written after $wind goes, the wind brings its own.
+        Assert.Equal("UNKL INFO $atiscode(UNKL). $time(UNKL). WIND $wind(UNKL). QNH $qnh(UNKL) HPA",
+            AtisText.ForAirport("$airport INFO $atiscode($airport). $time. WIND $wind($airport) KNOTS. QNH $qnh($airport) HPA", "unkl"));
+        Assert.Equal("WIND $wind(UUEE), $time(UUEE)", AtisText.ForAirport("WIND $wind(UUEE) KT, $time", "UUEE"));
+        Assert.Equal("$time(UUEE) $timestamp", AtisText.ForAirport("$time(UUEE) $timestamp", "UNKL"));
+
+        var knots = MetarParser.Parse("KJFK 270051Z 31012G20KT 10SM FEW250 22/13 A2992", now)!;
+        Assert.Equal("310/12G20KT", knots.Wind);
+        Assert.Contains("Wind 310 degrees 12 knots, gusting 20.", AtisText.Speech("Kennedy", "B", now, null, knots, ""));
+    }
+
+    [Theory]
+    [InlineData("312350Z", "2026-04-01T00:10:00", "2026-03-31T23:50:00")] // April has no 31st: last month
+    [InlineData("302350Z", "2026-10-01T00:05:00", "2026-09-30T23:50:00")]
+    [InlineData("010005Z", "2026-09-30T23:58:00", "2026-10-01T00:05:00")] // the computer clock a little behind
+    [InlineData("150930Z", "2026-09-27T01:14:00", "2026-09-15T09:30:00")]
+    public void MetarTime_FallsInTheRightMonth(string group, string now, string expected)
+    {
+        var at = DateTime.SpecifyKind(DateTime.Parse(now, System.Globalization.CultureInfo.InvariantCulture), DateTimeKind.Utc);
+        var metar = MetarParser.Parse($"UUEE {group} 27005MPS CAVOK 10/02 Q1017", at)!;
+        Assert.Equal(DateTime.Parse(expected, System.Globalization.CultureInfo.InvariantCulture), metar.ObservationTime);
+        Assert.Null(MetarParser.Parse("UUEE 27005MPS CAVOK 10/02 Q1017", at)!.ObservationTime);
     }
 
     [Fact]

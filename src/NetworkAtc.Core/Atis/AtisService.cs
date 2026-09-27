@@ -62,14 +62,19 @@ public sealed class AtisService
         return lines;
     }
 
-    /// <summary>The spoken ATIS for the station at this moment, in the station's language (Russian or English).</summary>
+    /// <summary>
+    /// The spoken ATIS for the station at this moment, in the station's language (Russian or English). Its time is
+    /// the time of the METAR, as in any ATIS; the clock only until a METAR has come in.
+    /// </summary>
     public string Speech(AtisSettings s)
     {
         string airport = s.Airport.ToUpperInvariant();
         _profile().ActiveRunways.TryGetValue(airport, out var runways);
         string name = s.SpokenName.Trim().Length > 0 ? s.SpokenName.Trim() : airport;
+        var metar = _metar(airport);
+        var time = metar?.ObservationTime ?? _clock();
         return s.Language.StartsWith("ru", StringComparison.OrdinalIgnoreCase)
-            ? AtisText.SpeechRu(name, Letter(airport), _clock(), runways, _metar(airport), s.Remark)
-            : AtisText.Speech(name, Letter(airport), _clock(), runways, _metar(airport), s.Remark);
+            ? AtisText.SpeechRu(name, Letter(airport), time, runways, metar, s.Remark)
+            : AtisText.Speech(name, Letter(airport), time, runways, metar, s.Remark);
     }
 }

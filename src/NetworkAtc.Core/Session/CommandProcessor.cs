@@ -531,7 +531,8 @@ public sealed partial class CommandProcessor(AtcSession session, Func<Profile> p
             case "myfreq": return session.Info is { } i ? Frequency.Format(i.FrequencyKhz) : p.Station.Frequency;
             case "myrealname": return p.Connection.RealName;
             case "myairport": return p.ActiveAirports.FirstOrDefault() ?? "";
-            case "time": return DateTime.UtcNow.ToString("HHmm", inv);
+            // $time(UUEE) is the time of the airport's METAR (the ATIS time); plain $time is the time now.
+            case "time": return (arg is { Length: > 0 } && metar?.ObservationTime is { } observed ? observed : DateTime.UtcNow).ToString("HHmm", inv);
             case "atiscode": return p.AtisLetters.GetValueOrDefault(airport, "");
             case "metar": return metar?.Raw ?? "";
             case "wind": return metar?.Wind ?? "";

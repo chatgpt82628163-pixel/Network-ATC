@@ -299,12 +299,12 @@ public class MetarTests
     public void ParsesWindAndPressure()
     {
         var m = MetarParser.Parse("UUEE 240930Z 24012G22MPS 9999 BKN020 05/02 Q1013 R24L/290050 NOSIG")!;
-        Assert.Equal(("UUEE", 240, 23, 43), (m.Station, m.WindDirection, m.WindSpeed, m.Gust));
+        Assert.Equal(("UUEE", 240, 12, 22, true), (m.Station, m.WindDirection, m.WindSpeed, m.Gust, m.WindInMps));
         Assert.Equal(1013, m.Qnh);
-        Assert.Equal("240/23G43", m.Wind);
+        Assert.Equal("240/12G22MPS", m.Wind);
         var us = MetarParser.Parse("METAR KJFK 240951Z VRB03KT 10SM FEW250 22/13 A2992 RMK AO2 SLP132")!;
         Assert.True(us.VariableWind);
-        Assert.Equal("VRB03", us.Wind);
+        Assert.Equal("VRB03KT", us.Wind);
         Assert.Equal(1013, us.Qnh);
         Assert.Equal("29.92", us.Altimeter);
         Assert.Null(MetarParser.Parse("garbage"));
@@ -351,6 +351,28 @@ public class EuroScopeCommandTests
     }
 
     [Fact]
+    public void AirspaceAnswers_FollowTheAircraftAndTheOwners()
+    {
+        var (_, session, _, ws, _) = Create();
+        // Standing still (no prediction) north of the TMA, far above it: not ours.
+        Demo.Pilot(session, "AFL1", 57.5, 37.41, 20000, gs: 0);
+        var t = session.Find("AFL1")!;
+        Assert.False(ws.IsConcerned(t));
+        Assert.Null(ws.MinutesToEntry(t));
+        // Into the TMA: ours at once, however often it was asked before.
+        Demo.Pilot(session, "AFL1", 55.97, 37.41, 5000, gs: 0);
+        Assert.True(ws.IsConcerned(t));
+        Assert.Equal(0, ws.MinutesToEntry(t));
+
+        // Climbing out northbound, cleared FL150: nobody has the airspace above until the centre comes online.
+        Demo.Pilot(session, "AFL1", 56.2, 37.4, 6000, gs: 300);
+        t.ClearedAltitude = 15000;
+        Assert.Null(ws.NextController(t));
+        session.OnPacket(null, FsdPacket.Parse(AtcPackets.Position("DEMO_CTR", 132000, Facility.Centre, 300, 5, new GeoPoint(56, 37)))!);
+        Assert.Equal("DEMO_CTR", ws.NextController(t));
+    }
+
+    [Fact]
     public async Task AtisLettersAndAliasVariables()
     {
         var (cmd, session, profile, ws, sel) = Create();
@@ -363,8 +385,10 @@ public class EuroScopeCommandTests
         sel.Add(session.Find("AFL1")!);
         profile.Aliases[".tkof"] = "$aircraft wind $wind($myairport) runway $deprwy cleared for takeoff, QNH $qnh(UUEE) info $atiscode(UUEE)";
         profile.ActiveRunways["UUEE"] = new RunwayUse { Departure = ["24R"], Arrival = ["24L"] };
-        Assert.Equal("AFL1 wind 240/05 runway 24R cleared for takeoff, QNH 1017 info B", cmd.ExpandAlias(".tkof"));
+        Assert.Equal("AFL1 wind 240/05KT runway 24R cleared for takeoff, QNH 1017 info B", cmd.ExpandAlias(".tkof"));
         Assert.Equal("$unknown stays", cmd.ExpandVariables("$unknown stays"));
+        Assert.Equal("0930", cmd.ExpandVariables("$time(UUEE)")); // the time of the METAR
+        Assert.Matches(@"^\d{4}$", cmd.ExpandVariables("$time")); // the time now
         profile.ControllerInfo = ["$mycallsign $myfreq", "", "ATIS $atiscode(UUEE)"];
         Assert.Equal(["UUEE_APP 128.000", "ATIS B"], cmd.ControllerInfoLines());
     }

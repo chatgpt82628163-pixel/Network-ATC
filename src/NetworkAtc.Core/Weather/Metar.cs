@@ -4,14 +4,17 @@ using System.Text.RegularExpressions;
 
 namespace NetworkAtc.Core.Weather;
 
-/// <summary>The parts of a METAR a controller needs at a glance.</summary>
+/// <summary>
+/// The parts of a METAR a controller needs at a glance. The wind speed and gust are in the METAR's own unit:
+/// metres per second when <see cref="WindInMps"/> (Russia, China…), knots otherwise.
+/// </summary>
 public sealed record Metar(string Station, string Raw, int? WindDirection, int WindSpeed, int? Gust, bool VariableWind,
-    int? QnhHpa, double? AltimeterInHg)
+    int? QnhHpa, double? AltimeterInHg, bool WindInMps = false, DateTime? ObservationTime = null)
 {
-    /// <summary>"240/12G22", "VRB03", "00000".</summary>
-    public string Wind => VariableWind
+    /// <summary>"240/06G11MPS", "270/16KT", "VRB03KT".</summary>
+    public string Wind => (VariableWind
         ? $"VRB{WindSpeed:00}"
-        : $"{WindDirection ?? 0:000}/{WindSpeed:00}" + (Gust is { } g ? $"G{g}" : "");
+        : $"{WindDirection ?? 0:000}/{WindSpeed:00}" + (Gust is { } g ? $"G{g:00}" : "")) + (WindInMps ? "MPS" : "KT");
 
     /// <summary>QNH in hPa, converted from inches of mercury when the METAR gives an A group.</summary>
     public int? Qnh => QnhHpa ?? (AltimeterInHg is { } a ? (int)Math.Round(a * 33.8639) : null);
@@ -26,20 +29,24 @@ public static partial class MetarParser
     [GeneratedRegex(@"^(?<dir>\d{3}|VRB)(?<spd>\d{2,3})(G(?<gust>\d{2,3}))?(?<unit>KT|MPS)$")]
     private static partial Regex WindGroup();
 
+    [GeneratedRegex(@"^(?<d>\d{2})(?<h>\d{2})(?<m>\d{2})Z$")]
+    private static partial Regex ObservationGroup();
+
     [GeneratedRegex(@"^Q(?<q>\d{4})$")]
     private static partial Regex QnhGroup();
 
     [GeneratedRegex(@"^A(?<a>\d{4})$")]
     private static partial Regex AltimeterGroup();
 
-    public static Metar? Parse(string raw)
+    /// <param name="now">The time now in UTC (for tests): the METAR gives only the day of the month.</param>
+    public static Metar? Parse(string raw, DateTime? now = null)
     {
         var tokens = raw.Trim().Split(' ', StringSplitOptions.RemoveEmptyEntries).ToList();
         if (tokens.Count > 0 && tokens[0] is "METAR" or "SPECI") tokens.RemoveAt(0);
         if (tokens.Count < 2 || tokens[0].Length != 4) return null;
         int? dir = null, gust = null, qnh = null;
         int speed = 0;
-        bool vrb = false, windFound = false;
+        bool vrb = false, windFound = false, mps = false;
         double? inHg = null;
         foreach (var t in tokens.Skip(1))
         {
@@ -47,18 +54,39 @@ public static partial class MetarParser
             if (!windFound && WindGroup().Match(t) is { Success: true } w)
             {
                 windFound = true;
-                double factor = w.Groups["unit"].Value == "MPS" ? 1.94384 : 1;
+                mps = w.Groups["unit"].Value == "MPS";
                 vrb = w.Groups["dir"].Value == "VRB";
                 if (!vrb) dir = int.Parse(w.Groups["dir"].Value, CultureInfo.InvariantCulture);
-                speed = (int)Math.Round(int.Parse(w.Groups["spd"].Value, CultureInfo.InvariantCulture) * factor);
-                if (w.Groups["gust"].Success) gust = (int)Math.Round(int.Parse(w.Groups["gust"].Value, CultureInfo.InvariantCulture) * factor);
+                speed = int.Parse(w.Groups["spd"].Value, CultureInfo.InvariantCulture);
+                if (w.Groups["gust"].Success) gust = int.Parse(w.Groups["gust"].Value, CultureInfo.InvariantCulture);
             }
             else if (qnh == null && QnhGroup().Match(t) is { Success: true } q)
                 qnh = int.Parse(q.Groups["q"].Value, CultureInfo.InvariantCulture);
             else if (inHg == null && AltimeterGroup().Match(t) is { Success: true } a)
                 inHg = int.Parse(a.Groups["a"].Value, CultureInfo.InvariantCulture) / 100.0;
         }
-        return new Metar(tokens[0].ToUpperInvariant(), raw.Trim(), dir, speed, gust, vrb, qnh, inHg);
+        return new Metar(tokens[0].ToUpperInvariant(), raw.Trim(), dir, speed, gust, vrb, qnh, inHg, mps,
+            Observed(tokens[1], now ?? DateTime.UtcNow));
+    }
+
+    /// <summary>"270100Z": the 27th at 01:00 UTC, in whichever month (last, this or next) that is closest to now.</summary>
+    private static DateTime? Observed(string token, DateTime now)
+    {
+        if (ObservationGroup().Match(token) is not { Success: true } m) return null;
+        int day = int.Parse(m.Groups["d"].Value, CultureInfo.InvariantCulture);
+        int hour = int.Parse(m.Groups["h"].Value, CultureInfo.InvariantCulture);
+        int minute = int.Parse(m.Groups["m"].Value, CultureInfo.InvariantCulture);
+        if (day < 1 || hour > 23 || minute > 59) return null;
+        var thisMonth = new DateTime(now.Year, now.Month, 1, 0, 0, 0, DateTimeKind.Utc);
+        DateTime? best = null;
+        for (int k = -1; k <= 1; k++)
+        {
+            var month = thisMonth.AddMonths(k);
+            if (day > DateTime.DaysInMonth(month.Year, month.Month)) continue;
+            var at = new DateTime(month.Year, month.Month, day, hour, minute, 0, DateTimeKind.Utc);
+            if (best == null || (at - now).Duration() < (best.Value - now).Duration()) best = at;
+        }
+        return best;
     }
 }
 
