@@ -627,7 +627,7 @@ public sealed class RadarView : FrameworkElement
                 if (Profile.ChosenProcedures.TryGetValue(ProcedureCatalog.Layer(kind), out var keys) && keys.Count > 0)
                 {
                     var wanted = new HashSet<string>(keys, StringComparer.OrdinalIgnoreCase);
-                    foreach (var e in ProcedureEntries(kind).Where(e => wanted.Contains(e.Key)))
+                    foreach (var e in ProcedureEntries(kind).Where(x => wanted.Contains(x.Key)))
                         shown.Add((e, ProcedureCatalog.Points(s, e)));
                 }
             _chosen = c = (s, Profile.ChosenProcedures, shown);
@@ -650,7 +650,7 @@ public sealed class RadarView : FrameworkElement
             string airport = proc.Airport;
             var near = s.Airports.FirstOrDefault(a => a.Name.Equals(airport, StringComparison.OrdinalIgnoreCase))?.Position ?? t.Position;
             var points = ProcedureCatalog.Resolve(s, proc, near);
-            var entry = ProcedureEntries(proc.Kind).FirstOrDefault(e => e.Airport == proc.Airport && e.Name == proc.Name);
+            var entry = ProcedureEntries(proc.Kind).FirstOrDefault(x => x.Airport == proc.Airport && x.Name == proc.Name);
             var pen = Paint.Pen(theme.RouteLine, 2);
             if (entry is { Diagrams.Count: > 0 } && s.Lines.TryGetValue(ProcedureCatalog.Layer(proc.Kind), out var lines))
             {
