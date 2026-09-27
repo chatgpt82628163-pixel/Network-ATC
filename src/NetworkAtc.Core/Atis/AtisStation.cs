@@ -91,7 +91,9 @@ public sealed class AtisStation : IAsyncDisposable
     {
         if (_fsd is not { } fsd || p.Fields.Length < 2 || !p[1].Equals(Callsign, StringComparison.OrdinalIgnoreCase)) return;
         foreach (var packet in Reply(p)) _ = fsd.SendAsync(packet);
-        if (p.Command == "$CQ" && p.Fields.Length >= 3 && p[2] == "ATIS") Requested?.Invoke(this, p[0]);
+        // The server asks every minute for the website map: answered, but not shown as a request.
+        if (p.Command == "$CQ" && p.Fields.Length >= 3 && p[2] == "ATIS" && !p[0].Equals("SERVER", StringComparison.OrdinalIgnoreCase))
+            Requested?.Invoke(this, p[0]);
     }
 
     /// <summary>What the ATIS sends back to a packet addressed to it.</summary>

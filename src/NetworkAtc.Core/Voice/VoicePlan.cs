@@ -51,7 +51,7 @@ public static class VoicePlan
     }
 
     /// <summary>Antenna sites at the visibility centres (up to four, near-duplicates merged); the fallback if there are none.</summary>
-    public static IReadOnlyList<AntennaSite> Sites(IEnumerable<GeoPoint> visibilityCenters, GeoPoint? fallback)
+    public static IReadOnlyList<AntennaSite> Sites(IEnumerable<GeoPoint> visibilityCenters, GeoPoint? fallback, double rangeNm = 0)
     {
         var points = new List<GeoPoint>();
         foreach (var p in visibilityCenters)
@@ -61,7 +61,7 @@ public static class VoicePlan
             if (points.Count == MaxSites) break;
         }
         if (points.Count == 0 && fallback is { } f && IsKnown(f)) points.Add(f);
-        return points.Select(p => new AntennaSite(p.Latitude, p.Longitude, SiteAltitudeFeet)).ToList();
+        return points.Select(p => new AntennaSite(p.Latitude, p.Longitude, SiteAltitudeFeet, rangeNm)).ToList();
     }
 
     /// <summary>Where to put the antenna without a visibility centre: the first active airport, else the sector centre.</summary>
@@ -90,6 +90,7 @@ public static class VoicePlan
         MicGain = (float)Math.Clamp(options.MicGain, 0, 4),
         OutputVolume = (float)Math.Clamp(options.OutputVolume, 0, 2),
         Ptt = PttBinding.Parse(options.PushToTalk),
+        RadioNoise = options.RadioNoise,
     };
 }
 

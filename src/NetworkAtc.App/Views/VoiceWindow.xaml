@@ -94,6 +94,7 @@
 
         <TextBlock Text="SERVER" Style="{StaticResource SectionTitle}"/>
         <CheckBox x:Name="EnabledBox" Content="Connect voice together with the network"/>
+        <CheckBox x:Name="RadioNoiseBox" Content="Radio noise (faint hiss and squelch sound)" Margin="0,6,0,0"/>
         <StackPanel Orientation="Horizontal" Margin="0,4,0,0">
           <TextBlock Text="Voice server port" Style="{StaticResource Muted}" Margin="0,0,10,0"/>
           <TextBox x:Name="PortBox" Width="80" FontFamily="{StaticResource MonoFont}"/>

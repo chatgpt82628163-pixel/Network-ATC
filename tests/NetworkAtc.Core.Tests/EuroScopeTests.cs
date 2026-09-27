@@ -439,3 +439,43 @@ public class ReportedPositionTests
         Assert.Equal(s.Center, ReportedPosition.For(s, "XXXX_CTR", "135.000", Facility.Centre));
     }
 }
+
+public class RangeTests
+{
+    [Fact]
+    public void FacilitiesHaveTheirUsualRange()
+    {
+        Assert.Equal(100, Facility.Ground.DefaultRangeNm());
+        Assert.Equal(100, Facility.Tower.DefaultRangeNm());
+        Assert.Equal(400, Facility.Approach.DefaultRangeNm());
+        Assert.Equal(1000, Facility.Centre.DefaultRangeNm());
+        Assert.Equal(1500, Facility.FlightService.DefaultRangeNm());
+        Assert.Equal(10000, FacilityExtensions.MaxRangeNm);
+    }
+
+    [Fact]
+    public void RangeCountsFromTheSectorBorder()
+    {
+        var s = Demo.Sector();
+        var at = ReportedPosition.For(s, "DEMO_CTR", "132.000", Facility.Centre);
+        var border = Airspace.Areas(s).First(a => a.Sector.Name == "DEMO_CTR").Polygon;
+        double extent = border.Max(p => NetworkAtc.Core.Geo.GeoMath.DistanceNm(at, p));
+        int coverage = ReportedPosition.CoverageNm(s, "DEMO_CTR", "132.000", Facility.Centre, at, 1000);
+        Assert.InRange(coverage, 1000 + extent, 1000 + extent + 1);
+        // A tower counts from its airport; the total never passes the maximum.
+        var uuee = s.Airports.First(a => a.Name == "UUEE").Position;
+        Assert.Equal(100, ReportedPosition.CoverageNm(s, "UUEE_TWR", "131.500", Facility.Tower, uuee, 100));
+        Assert.Equal(10000, ReportedPosition.CoverageNm(s, "DEMO_CTR", "132.000", Facility.Centre, at, 10000));
+        Assert.Equal(400, ReportedPosition.CoverageNm(null, "XXXX_APP", "120.000", Facility.Approach, at, 400));
+    }
+
+    [Fact]
+    public void VoiceSitesCarryTheCoverage_AndNoiseCanBeOff()
+    {
+        var sites = NetworkAtc.Core.Voice.VoicePlan.Sites([new NetworkAtc.Plugins.GeoPoint(55.9, 37.4)], null, 1234);
+        Assert.Equal(1234, Assert.Single(sites).RangeNm);
+        var options = new VoiceOptions { RadioNoise = false };
+        Assert.False(NetworkAtc.Core.Voice.VoicePlan.Settings(options, [], []).RadioNoise);
+        Assert.True(new VoiceOptions().RadioNoise);
+    }
+}

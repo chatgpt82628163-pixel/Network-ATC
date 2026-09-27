@@ -123,6 +123,8 @@ public sealed class VoiceOptions
     public double OutputVolume { get; set; } = 1;
     /// <summary>Push-to-talk control as stored by the voice library: "key:162", "joy:0:4" or "" (none).</summary>
     public string PushToTalk { get; set; } = "";
+    /// <summary>Faint receiver hiss and squelch tail on what is heard; off gives a clean voice.</summary>
+    public bool RadioNoise { get; set; } = true;
 }
 
 /// <summary>Position, size and visibility of a floating list window.</summary>

@@ -24,6 +24,23 @@ public static class FacilityExtensions
 
     /// <summary>Lowest rating allowed for the facility: SUP (11) for supervisors, ADM (12) for administrators.</summary>
     public static int MinimumRating(this Facility f) => f switch { Facility.Supervisor => 11, Facility.Administrator => 12, _ => 1 };
+
+    /// <summary>The largest range a controller may set, NM.</summary>
+    public const int MaxRangeNm = 10000;
+
+    /// <summary>
+    /// Usual range of a position, NM, counted from the border of its airspace (see <c>ReportedPosition.CoverageNm</c>):
+    /// the traffic it sees and how far its radio reaches.
+    /// </summary>
+    public static int DefaultRangeNm(this Facility f) => f switch
+    {
+        Facility.Delivery or Facility.Ground or Facility.Tower => 100,
+        Facility.Approach => 400,
+        Facility.Centre => 1000,
+        Facility.FlightService => 1500,
+        Facility.Supervisor or Facility.Administrator => MaxRangeNm,
+        _ => 100,
+    };
 }
 
 public sealed record PilotReport(

@@ -36,7 +36,8 @@
         <ComboBox x:Name="RatingBox"/>
       </StackPanel>
       <StackPanel Grid.Column="4">
-        <TextBlock Text="Range, NM" Style="{StaticResource FieldLabel}"/>
+        <TextBlock Text="Range from the sector border, NM" Style="{StaticResource FieldLabel}"
+                   ToolTip="Traffic and radio reach beyond your airspace. Usual: DEL/GND/TWR 100, APP/DEP 400, CTR 1000, FSS 1500 (max 10000)"/>
         <TextBox x:Name="RangeBox"/>
       </StackPanel>
     </Grid>
