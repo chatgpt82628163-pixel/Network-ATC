@@ -68,12 +68,16 @@ public sealed class Workspace : IDisposable
     /// <summary>Recomputes sector owners from the controllers online and ourselves.</summary>
     public void UpdateOwnership()
     {
+        if (_ownership != null)
+        {
+            var online = _session.Controllers.Select(c => new OnlineStation(c.Callsign, Frequency.Format(c.FrequencyKhz))).ToList();
+            online.Add(new OnlineStation(_session.Me, _session.Info is { } i ? Frequency.Format(i.FrequencyKhz) : _profile().Station.Frequency));
+            // Sectors taken by hand count only while we are on the network.
+            _ownership.Update(online, _session.IsConnected ? _session.Me : null, _profile().MySectors);
+        }
+        // Only after the owners have changed (this runs on the network thread): an answer worked out meanwhile from
+        // the old owners is kept under the old number and worked out again.
         Interlocked.Increment(ref _ownersVersion);
-        if (_ownership == null) return;
-        var online = _session.Controllers.Select(c => new OnlineStation(c.Callsign, Frequency.Format(c.FrequencyKhz))).ToList();
-        online.Add(new OnlineStation(_session.Me, _session.Info is { } i ? Frequency.Format(i.FrequencyKhz) : _profile().Station.Frequency));
-        // Sectors taken by hand count only while we are on the network.
-        _ownership.Update(online, _session.IsConnected ? _session.Me : null, _profile().MySectors);
     }
 
     /// <summary>Short name of a controller: its .ese identifier ("EA") or the callsign.</summary>

@@ -344,10 +344,19 @@ public sealed class RadarView : FrameworkElement
         foreach (var layer in s.CustomLayers) key.Append('|').Append(layer).Append(Profile.IsLayerVisible(layer) ? '1' : '0');
         // This key is checked in every frame and a display's element lists can be long: they are told apart by the
         // lists themselves and their sizes, not their text (a display replaces them or clears them, never edits them).
-        key.Append('|').Append(System.Runtime.CompilerServices.RuntimeHelpers.GetHashCode(Profile.MapItems))
+        if (!ReferenceEquals(_mapItemsSeen, Profile.MapItems))
+        {
+            _mapItemsSeen = Profile.MapItems;
+            _mapItemsGeneration++;
+        }
+        key.Append('|').Append(_mapItemsGeneration)
            .Append(':').Append(Profile.MapItems.Count).Append(':').Append(Profile.MapItems.Values.Sum(v => v.Count));
         return key.ToString();
     }
+
+    /// <summary>The display's element lists last seen by <see cref="MapKey"/>, and how many different ones there were.</summary>
+    private object? _mapItemsSeen;
+    private int _mapItemsGeneration;
 
     private Point ToPlane(GeoPoint p)
     {
