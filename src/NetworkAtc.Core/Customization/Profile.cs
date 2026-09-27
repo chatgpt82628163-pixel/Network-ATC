@@ -360,6 +360,11 @@ public sealed class Profile
     /// a layer not listed shows all its elements.
     /// </summary>
     public Dictionary<string, List<string>> MapItems { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+    /// <summary>
+    /// SIDs and STARs picked in their menus, by layer ("STAR" → "UUEE GENPA1B"): only their diagrams are drawn, with the
+    /// names and limits of their points. A layer not listed shows all its diagrams.
+    /// </summary>
+    public Dictionary<string, List<string>> ChosenProcedures { get; set; } = new(StringComparer.OrdinalIgnoreCase);
     /// <summary>EuroScope display files (.asr) opened lately, newest first.</summary>
     public List<string> RecentAsr { get; set; } = [];
 
@@ -393,6 +398,7 @@ public sealed class Profile
         ["HandoffNext"] = "Ctrl+H",
         ["ReleaseOrRefuse"] = "Ctrl+D",
         ["ToggleRoute"] = "Ctrl+T",
+        ["ShowProcedure"] = "Tab",
         ["ActiveRunways"] = "Ctrl+R",
         ["ToggleSil"] = "Ctrl+I",
         ["ToggleSel"] = "Ctrl+E",

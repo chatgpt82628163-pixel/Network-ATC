@@ -215,6 +215,7 @@ public sealed class RadarView : FrameworkElement
         if (drawing?.Back is { } back) dc.DrawImage(back, full);
         DrawOverlays(dc);
         DrawRoutes(dc, theme);
+        if (Sector != null) DrawProcedures(dc, Sector, theme);
         DrawTraffic(dc, theme);
         if (drawing?.Front is { } front) dc.DrawImage(front, full);
         DrawMeasures(dc, theme);
@@ -596,6 +597,91 @@ public sealed class RadarView : FrameworkElement
                 DrawSmallText(dc, points[i].Name, new Point(p.X + 5, p.Y + 2), theme.RouteLine);
                 prev = p;
             }
+        }
+    }
+
+    /// <summary>The SID and STAR menus of the sector, worked out once per sector.</summary>
+    private (SectorFile Sector, IReadOnlyList<ProcedureEntry> Sids, IReadOnlyList<ProcedureEntry> Stars)? _entries;
+
+    public IReadOnlyList<ProcedureEntry> ProcedureEntries(ProcedureKind kind)
+    {
+        if (Sector is not { } s) return [];
+        if (_entries is not { } e || !ReferenceEquals(e.Sector, s))
+            _entries = e = (s, ProcedureCatalog.Entries(s, ProcedureKind.Sid), ProcedureCatalog.Entries(s, ProcedureKind.Star));
+        return kind == ProcedureKind.Sid ? e.Sids : e.Stars;
+    }
+
+    /// <summary>The SIDs and STARs picked in their menus, with their points, by the choice they were worked out for.</summary>
+    private (SectorFile Sector, object Choice, List<(ProcedureEntry Entry, IReadOnlyList<ProcedurePoint> Points)> Shown)? _chosen;
+
+    /// <summary>
+    /// Procedures drawn with their points named, whatever the FIX NAMES layer says: the SIDs and STARs picked in their
+    /// menus, and the one each aircraft with Tab on will fly, over its diagram (or its route when the sector draws none).
+    /// </summary>
+    private void DrawProcedures(DrawingContext dc, SectorFile s, Theme theme)
+    {
+        if (_chosen is not { } c || !ReferenceEquals(c.Sector, s) || !ReferenceEquals(c.Choice, Profile.ChosenProcedures))
+        {
+            var shown = new List<(ProcedureEntry, IReadOnlyList<ProcedurePoint>)>();
+            foreach (var kind in new[] { ProcedureKind.Sid, ProcedureKind.Star })
+                if (Profile.ChosenProcedures.TryGetValue(ProcedureCatalog.Layer(kind), out var keys) && keys.Count > 0)
+                {
+                    var wanted = new HashSet<string>(keys, StringComparer.OrdinalIgnoreCase);
+                    foreach (var e in ProcedureEntries(kind).Where(e => wanted.Contains(e.Key)))
+                        shown.Add((e, ProcedureCatalog.Points(s, e)));
+                }
+            _chosen = c = (s, Profile.ChosenProcedures, shown);
+        }
+        foreach (var (entry, points) in c.Shown)
+        {
+            string layer = ProcedureCatalog.Layer(entry.Kind);
+            if (!Profile.IsLayerVisible(layer)) continue;
+            // Without a diagram the route itself is the drawing.
+            if (entry.Diagrams.Count == 0)
+                foreach (var p in entry.Procedures)
+                    DrawPath(dc, ProcedureCatalog.Resolve(s, p, points.Count > 0 ? points[0].Position : s.Center), entry.Kind == ProcedureKind.Sid ? theme.Sid : theme.Star, 1);
+            DrawProcedurePoints(dc, points, theme.Accent);
+        }
+
+        if (Workspace == null) return;
+        foreach (var t in Tracks().Where(t => t.ShowProcedure && t.LastUpdate != default))
+        {
+            if (Workspace.Procedures.Expected(t) is not { } proc) continue;
+            string airport = proc.Airport;
+            var near = s.Airports.FirstOrDefault(a => a.Name.Equals(airport, StringComparison.OrdinalIgnoreCase))?.Position ?? t.Position;
+            var points = ProcedureCatalog.Resolve(s, proc, near);
+            var entry = ProcedureEntries(proc.Kind).FirstOrDefault(e => e.Airport == proc.Airport && e.Name == proc.Name);
+            var pen = Paint.Pen(theme.RouteLine, 2);
+            if (entry is { Diagrams.Count: > 0 } && s.Lines.TryGetValue(ProcedureCatalog.Layer(proc.Kind), out var lines))
+            {
+                var names = new HashSet<string>(entry.Diagrams, StringComparer.OrdinalIgnoreCase);
+                foreach (var l in lines.Where(l => names.Contains(l.Name.Trim()))) dc.DrawLine(pen, ToScreen(l.From), ToScreen(l.To));
+            }
+            else DrawPath(dc, points, theme.RouteLine, 2);
+            DrawProcedurePoints(dc, points, theme.RouteLine);
+            // The name of the procedure at its first point: where a STAR starts, where a SID begins its climb.
+            if (points.Count > 0)
+                DrawSmallText(dc, $"{(proc.Kind == ProcedureKind.Sid ? "SID" : "STAR")} {proc.Name}", ToScreen(points[0].Position) + new Vector(6, -20), theme.RouteLine, 11);
+        }
+    }
+
+    private void DrawPath(DrawingContext dc, IReadOnlyList<ProcedurePoint> points, string color, double width)
+    {
+        var pen = Paint.Pen(color, width);
+        for (int i = 1; i < points.Count; i++) dc.DrawLine(pen, ToScreen(points[i - 1].Position), ToScreen(points[i].Position));
+    }
+
+    /// <summary>A ring at each point, its name and, under the name, its altitude and speed limits.</summary>
+    private void DrawProcedurePoints(DrawingContext dc, IReadOnlyList<ProcedurePoint> points, string color)
+    {
+        var ring = Paint.Pen(color, 1);
+        foreach (var p in points)
+        {
+            var at = ToScreen(p.Position);
+            if (!OnScreen(at)) continue;
+            dc.DrawEllipse(null, ring, at, 3, 3);
+            DrawSmallText(dc, p.Name, new Point(at.X + 6, at.Y - 7), color);
+            if (p.Limits.Length > 0) DrawSmallText(dc, p.Limits, new Point(at.X + 6, at.Y + 5), color);
         }
     }
 

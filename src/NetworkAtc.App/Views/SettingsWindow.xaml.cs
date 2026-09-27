@@ -79,6 +79,7 @@ public partial class SettingsWindow : Window
         ["ToggleAtc"] = "Controllers", ["OpenSector"] = "Sector selection",
         ["AssumeOrAccept"] = "Assume / accept handoff", ["HandoffNext"] = "Hand off to next controller",
         ["ReleaseOrRefuse"] = "Release / refuse handoff", ["ToggleRoute"] = "Route of selected aircraft",
+        ["ShowProcedure"] = "SID / STAR of selected aircraft",
         ["ActiveRunways"] = "Active runways", ["ToggleSil"] = "Incoming (SIL)", ["ToggleSel"] = "Outgoing (SEL)",
     };
 

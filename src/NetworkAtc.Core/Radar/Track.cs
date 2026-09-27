@@ -66,6 +66,8 @@ public sealed class Track(string callsign) : IAircraft
     // ---- display (local) ----
 
     public bool ShowRoute { get; set; }
+    /// <summary>The SID or STAR the aircraft flies next is drawn with its points (Tab).</summary>
+    public bool ShowProcedure { get; set; }
     /// <summary>Radius of the separation halo around the target, NM; null = none.</summary>
     public double? HaloNm { get; set; }
 

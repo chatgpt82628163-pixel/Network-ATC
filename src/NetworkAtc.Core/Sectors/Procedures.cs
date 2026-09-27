@@ -99,6 +99,29 @@ public sealed partial class ProcedureAssigner(Func<SectorFile?> sector, Func<IRe
     }
 
     /// <summary>
+    /// The procedure the aircraft flies next: its SID while it is still near the departure airport (closer to it than to
+    /// the destination, within 40 NM), otherwise its STAR; the other one when the sector has no fitting procedure.
+    /// </summary>
+    public Procedure? Expected(Track t)
+    {
+        var s = sector();
+        if (s == null) return null;
+        double To(string airport) =>
+            s.Airports.FirstOrDefault(x => x.Name.Equals(airport, StringComparison.OrdinalIgnoreCase)) is { } found
+                ? Geo.GeoMath.DistanceNm(t.Position, found.Position) : double.MaxValue;
+        double fromDeparture = To(t.Departure);
+        bool departing = fromDeparture < 40 && fromDeparture <= To(t.Destination);
+        Procedure? sid = Sid(t) is { } sidName ? Pick(Sids(t.Departure, DepartureRunway(t)), Sids(t.Departure, null), sidName) : null;
+        Procedure? star = Star(t) is { } starName ? Pick(Stars(t.Destination, ArrivalRunway(t)), Stars(t.Destination, null), starName) : null;
+        return departing ? sid ?? star : star ?? sid;
+    }
+
+    /// <summary>The procedure of that name for the runway in use, or for any runway.</summary>
+    private static Procedure? Pick(IEnumerable<Procedure> forRunway, IEnumerable<Procedure> any, string name) =>
+        forRunway.FirstOrDefault(p => p.Name.Equals(name, StringComparison.OrdinalIgnoreCase)) ??
+        any.FirstOrDefault(p => p.Name.Equals(name, StringComparison.OrdinalIgnoreCase));
+
+    /// <summary>
     /// The flight plan route as points known to the sector file: departure airport, SID fixes, route
     /// waypoints, STAR fixes, destination. Airways and unknown names are skipped.
     /// </summary>

@@ -69,11 +69,11 @@ public static class NativeSector
         s.Positions.AddRange((doc.Positions ?? []).Select(p =>
             new AtcPosition(p.Callsign ?? "", p.RadioName ?? "", p.Frequency ?? "", p.Identifier ?? "", p.Prefix ?? "", p.Suffix ?? "",
                 p.Squawks is [var from, var to] ? from : null, p.Squawks is [_, var end] ? end : null)));
-        s.Procedures.AddRange((doc.Procedures ?? []).Select(p => new Procedure(
+        s.Procedures.AddRange((doc.Procedures ?? []).Select(p => Procedure.Parse(
             p.Kind?.Equals("STAR", StringComparison.OrdinalIgnoreCase) == true ? ProcedureKind.Star : ProcedureKind.Sid,
             // Names and points in capitals, as the .ese reader keeps them, so ".sid demo1a" finds DEMO1A.
             (p.Airport ?? "").ToUpperInvariant(), (p.Runway ?? "").ToUpperInvariant(), (p.Name ?? "").ToUpperInvariant(),
-            (p.Route ?? []).Select(x => x.ToUpperInvariant()).ToList())));
+            p.Route ?? [])));
         foreach (var (id, pts) in doc.SectorLines ?? []) s.SectorLines[id] = pts.Select(ToPoint).ToList();
         s.Sectors.AddRange((doc.Sectors ?? []).Select(a => new AirspaceSector(a.Name ?? "", a.Floor, a.Ceiling, a.Owners ?? [], a.Borders ?? [])));
         if (s.Center == default && s.Airports.Count > 0) s.Center = s.Airports[0].Position;
@@ -120,7 +120,7 @@ public static class NativeSector
             }).ToList(),
             Procedures = s.Procedures.Count == 0 ? null : s.Procedures.Select(p => new ProcedureDto
             {
-                Kind = p.Kind == ProcedureKind.Star ? "STAR" : "SID", Airport = p.Airport, Runway = p.Runway, Name = p.Name, Route = p.Route.ToList(),
+                Kind = p.Kind == ProcedureKind.Star ? "STAR" : "SID", Airport = p.Airport, Runway = p.Runway, Name = p.Name, Route = p.RouteWords.ToList(),
             }).ToList(),
             SectorLines = s.SectorLines.ToDictionary(kv => kv.Key, kv => kv.Value.Select(FromPoint).ToList()),
             Sectors = s.Sectors.Select(a => new AirspaceDto

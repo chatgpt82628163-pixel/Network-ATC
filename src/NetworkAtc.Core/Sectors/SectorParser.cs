@@ -322,9 +322,9 @@ public static partial class SectorParser
                         f.Length > 10 ? ParseSquawk(f[9]) : null, f.Length > 10 ? ParseSquawk(f[10]) : null));
                     break;
                 case "SIDSSTARS" when f.Length >= 5 && f[0].ToUpperInvariant() is "SID" or "STAR":
-                    sector.Procedures.Add(new Procedure(f[0].Equals("SID", StringComparison.OrdinalIgnoreCase) ? ProcedureKind.Sid : ProcedureKind.Star,
+                    sector.Procedures.Add(Procedure.Parse(f[0].Equals("SID", StringComparison.OrdinalIgnoreCase) ? ProcedureKind.Sid : ProcedureKind.Star,
                         f[1].Trim().ToUpperInvariant(), f[2].Trim().ToUpperInvariant(), f[3].Trim().ToUpperInvariant(),
-                        f[4].Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries).Select(x => x.ToUpperInvariant()).ToList()));
+                        f[4].Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries)));
                     break;
                 case "FREETEXT" when f.Length >= 4:
                     if (TryParseCoordinate(f[0], out var lat) && TryParseCoordinate(f[1], out var lon))

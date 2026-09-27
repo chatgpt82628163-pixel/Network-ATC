@@ -159,6 +159,81 @@ public class ProcedureTests
         Assert.Equal(["UUEE", "SHR", "DEMO5", "DEMO2", "DEMO1", "SHR", "UUEE"], names);
         Assert.Equal(["SHR", "DCT", "DEMO5", "UM100"], ProcedureAssigner.Tokens("N0450F350 SHR DCT DEMO5/N0440F360 UM100"));
     }
+
+    [Fact]
+    public void ExpectedProcedure_IsTheSidNearTheDepartureAndTheStarLater()
+    {
+        var (proc, session, _) = Create();
+        Demo.Pilot(session, "AFL1", 55.97, 37.41, 0);
+        Demo.Plan(session, "AFL1", "UUEE", "ULLI", "N0450F350 DEMO4 DM100");
+        Demo.Pilot(session, "SBI2", 57.5, 38.5, 24000);
+        Demo.Plan(session, "SBI2", "ULLI", "UUEE", "DM100 DEMO2");
+        var sid = proc.Expected(session.Find("AFL1")!);
+        Assert.Equal((ProcedureKind.Sid, "DEMO4A", "24R"), (sid!.Kind, sid.Name, sid.Runway));
+        var star = proc.Expected(session.Find("SBI2")!);
+        Assert.Equal((ProcedureKind.Star, "DEMO2A", "24L"), (star!.Kind, star.Name, star.Runway));
+        // Without a flight plan there is nothing to show.
+        Demo.Pilot(session, "NOFP", 56.0, 37.5, 5000);
+        Assert.Null(proc.Expected(session.Find("NOFP")!));
+    }
+
+    [Fact]
+    public void Catalog_GroupsProceduresWithTheirDiagrams_AndNamesTheirPoints()
+    {
+        var s = Demo.Sector();
+        var stars = ProcedureCatalog.Entries(s, ProcedureKind.Star);
+        Assert.Equal(["DEMO2A", "DEMO2B", "DEMO3A", "DEMO3B"], stars.Select(e => e.Name));
+        var demo2a = stars[0];
+        Assert.Equal(("UUEE", "UUEE DEMO2A"), (demo2a.Airport, demo2a.Key));
+        Assert.Equal(["24L"], demo2a.Runways);
+        Assert.Equal(["DEMO2A"], demo2a.Diagrams);
+        Assert.Empty(stars[1].Diagrams);
+        Assert.Equal(["DEMO2", "DEMO1", "SHR"], ProcedureCatalog.Points(s, demo2a).Select(p => p.Name));
+
+        // Diagram names with an airport in them belong to that airport's procedure only; a diagram no procedure
+        // claims is a line of its own, its corners on fixes named.
+        var sector = new SectorFile();
+        sector.Airports.Add(new NamedPoint("UUEE", new GeoPoint(55.97, 37.41)));
+        sector.Airports.Add(new NamedPoint("UUWW", new GeoPoint(55.60, 37.27)));
+        sector.Fixes.Add(new NamedPoint("GENPA", new GeoPoint(56.5, 38.0)));
+        sector.Fixes.Add(new NamedPoint("RIGAS", new GeoPoint(56.2, 37.8)));
+        sector.Lines["STAR"] =
+        [
+            new SectorLine("UUEE_STAR_GENPA1B", new GeoPoint(56.5, 38.0), new GeoPoint(56.2, 37.8), null),
+            new SectorLine("UUWW GENPA1B", new GeoPoint(56.5, 38.0), new GeoPoint(55.6, 37.27), null),
+            new SectorLine("UUEE TRANSITIONS", new GeoPoint(56.2, 37.8), new GeoPoint(56.0, 37.5), null),
+        ];
+        sector.Procedures.Add(Procedure.Parse(ProcedureKind.Star, "UUEE", "24L", "GENPA1B", ["GENPA/FL100-/K250", "RIGAS/A6000+", "UUEE"]));
+        sector.Procedures.Add(Procedure.Parse(ProcedureKind.Star, "UUEE", "24C", "GENPA1B", ["GENPA", "RIGAS"]));
+        var entries = ProcedureCatalog.Entries(sector, ProcedureKind.Star);
+        Assert.Equal(["UUEE GENPA1B", "UUEE UUEE TRANSITIONS", "UUWW UUWW GENPA1B"], entries.Select(e => e.Key));
+        var genpa = entries[0];
+        Assert.Equal(["24L", "24C"], genpa.Runways);
+        Assert.Equal(["UUEE_STAR_GENPA1B"], genpa.Diagrams);
+        var points = ProcedureCatalog.Points(sector, genpa);
+        Assert.Equal([("GENPA", "≤FL100 250 kt"), ("RIGAS", "≥6000"), ("UUEE", "")], points.Select(p => (p.Name, p.Limits)));
+        Assert.Equal(["RIGAS"], ProcedureCatalog.Points(sector, entries[1]).Select(p => p.Name));
+    }
+
+    [Fact]
+    public void Limits_AreSplitOffTheRoute_AndWrittenBack()
+    {
+        var p = Procedure.Parse(ProcedureKind.Sid, "UUEE", "24R", "DEMO1A", ["shr/a3000-", "DEMO5/FL070/K220-", "DEMO4"]);
+        Assert.Equal(["SHR", "DEMO5", "DEMO4"], p.Route);
+        Assert.Equal(["A3000-", "FL070/K220-", ""], p.Limits);
+        Assert.Equal(["SHR/A3000-", "DEMO5/FL070/K220-", "DEMO4"], p.RouteWords);
+        Assert.Empty(Procedure.Parse(ProcedureKind.Sid, "UUEE", "24R", "X", ["SHR", "DEMO5"]).Limits);
+        Assert.Equal("≤3000", ProcedureCatalog.Describe("A3000-"));
+        Assert.Equal("FL070 ≤220 kt", ProcedureCatalog.Describe("FL070/K220-"));
+        Assert.Equal("MAX 230", ProcedureCatalog.Describe("MAX 230"));
+
+        // The .ese reader and the native format keep them.
+        var sector = SectorParser.ParseSct("[FIXES]\nSHR N055.58.00.000 E037.25.00.000\n");
+        SectorParser.ParseEse("[SIDSSTARS]\nSID:UUEE:24R:DEMO1A:SHR/A3000- DEMO5/FL070\n", sector);
+        Assert.Equal(["SHR", "DEMO5"], sector.Procedures[0].Route);
+        var again = NativeSector.Parse(NativeSector.Serialize(sector));
+        Assert.Equal(["A3000-", "FL070"], again.Procedures[0].Limits);
+    }
 }
 
 public class CoordinationTests

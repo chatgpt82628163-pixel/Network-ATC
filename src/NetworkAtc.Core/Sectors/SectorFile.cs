@@ -20,7 +20,35 @@ public sealed record AtcPosition(string Callsign, string RadioName, string Frequ
 public enum ProcedureKind { Sid, Star }
 
 /// <summary>A SID or STAR from the .ese [SIDSSTARS] section: SID:UUEE:24R:DEMO1A:SHR DEMO5.</summary>
-public sealed record Procedure(ProcedureKind Kind, string Airport, string Runway, string Name, IReadOnlyList<string> Route);
+public sealed record Procedure(ProcedureKind Kind, string Airport, string Runway, string Name, IReadOnlyList<string> Route)
+{
+    /// <summary>
+    /// Altitude and speed limits at each point of the route, as the sector writes them after the fix name
+    /// (GENPA/A6000+/K250: at or above 6000 ft, 250 kt): "A6000+/K250", or "" at a point without limits.
+    /// Empty when the procedure has none at all.
+    /// </summary>
+    public IReadOnlyList<string> Limits { get; init; } = [];
+
+    /// <summary>A procedure from its route words: the limits after a slash go to <see cref="Limits"/>, the names to the route.</summary>
+    public static Procedure Parse(ProcedureKind kind, string airport, string runway, string name, IEnumerable<string> route)
+    {
+        var names = new List<string>();
+        var limits = new List<string>();
+        foreach (var word in route)
+        {
+            int slash = word.IndexOf('/');
+            string fix = (slash < 0 ? word : word[..slash]).Trim().ToUpperInvariant();
+            if (fix.Length == 0) continue;
+            names.Add(fix);
+            limits.Add(slash < 0 ? "" : word[(slash + 1)..].Trim().ToUpperInvariant());
+        }
+        return new Procedure(kind, airport, runway, name, names) { Limits = limits.Exists(l => l.Length > 0) ? limits : [] };
+    }
+
+    /// <summary>The route as the sector writes it, limits included: GENPA/A6000+ RIGAS.</summary>
+    public IEnumerable<string> RouteWords =>
+        Route.Select((fix, i) => i < Limits.Count && Limits[i].Length > 0 ? $"{fix}/{Limits[i]}" : fix);
+}
 
 /// <summary>An airspace sector from the .ese [AIRSPACE] section.</summary>
 public sealed record AirspaceSector(string Name, int Floor, int Ceiling, IReadOnlyList<string> Owners, IReadOnlyList<string> BorderLines);

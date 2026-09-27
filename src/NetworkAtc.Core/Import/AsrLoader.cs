@@ -33,6 +33,7 @@ public static class AsrLoader
             notes.Add($"map elements: {asr.ElementCount}");
         }
         else profile.MapItems = new(StringComparer.OrdinalIgnoreCase);
+        profile.ChosenProcedures = new(StringComparer.OrdinalIgnoreCase);
 
         if (asr.View() is var (center, scale))
         {

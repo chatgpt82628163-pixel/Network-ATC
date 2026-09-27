@@ -1009,6 +1009,10 @@ public partial class MainWindow : Window
         var route = Item("Show route on radar", () => t.ShowRoute = !t.ShowRoute);
         route.IsCheckable = true;
         route.IsChecked = t.ShowRoute;
+        var procedure = Item("Show SID / STAR", () => ToggleProcedure(t));
+        procedure.IsCheckable = true;
+        procedure.IsChecked = t.ShowProcedure;
+        procedure.InputGestureText = _profile.KeyBindings.GetValueOrDefault("ShowProcedure", "");
         var halo = Sub($"Halo around aircraft{(t.HaloNm is { } h ? $"  {h:0.#} NM" : "")}");
         foreach (var nm in new[] { 1, 3, 5, 10, 15 }) Item($"{nm} NM", () => t.HaloNm = nm, halo);
         Item("remove", () => t.HaloNm = null, halo);
@@ -1283,6 +1287,97 @@ public partial class MainWindow : Window
         }
     }
 
+    private void OnSidClick(object sender, RoutedEventArgs e) => ShowProcedureMenu((Button)sender, ProcedureKind.Sid);
+    private void OnStarClick(object sender, RoutedEventArgs e) => ShowProcedureMenu((Button)sender, ProcedureKind.Star);
+
+    /// <summary>
+    /// SID / STAR: all diagrams, none, or only the procedures ticked here, drawn with the names and limits of their points.
+    /// The menu stays open while procedures are ticked, so several can be picked at once.
+    /// </summary>
+    private void ShowProcedureMenu(Button button, ProcedureKind kind)
+    {
+        string layer = ProcedureCatalog.Layer(kind);
+        var entries = Radar.ProcedureEntries(kind);
+        var chosen = new HashSet<string>(_profile.ChosenProcedures.GetValueOrDefault(layer) ?? [], StringComparer.OrdinalIgnoreCase);
+        bool visible = _profile.IsLayerVisible(layer);
+        var menu = new ContextMenu { PlacementTarget = button, Placement = System.Windows.Controls.Primitives.PlacementMode.Bottom, MaxHeight = 620 };
+        var all = MenuEntry($"All {layer} diagrams", () => SetChosenProcedures(kind, [], show: true));
+        all.IsChecked = visible && chosen.Count == 0;
+        menu.Items.Add(all);
+        var none = MenuEntry($"Hide {layer} diagrams", () => SetChosenProcedures(kind, [], show: false));
+        none.IsChecked = !visible;
+        menu.Items.Add(none);
+        menu.Items.Add(new Separator());
+        if (entries.Count == 0)
+            menu.Items.Add(new MenuItem { Header = Radar.Sector == null ? "No sector loaded" : $"No {layer}s in this sector", IsEnabled = false });
+        var airports = entries.GroupBy(x => x.Airport).ToList();
+        foreach (var airport in airports)
+        {
+            ItemsControl parent = menu;
+            if (airports.Count > 1)
+            {
+                int ticked = airport.Count(x => chosen.Contains(x.Key));
+                var sub = new MenuItem
+                {
+                    Header = new TextBlock { Text = airport.Key.Length > 0 ? airport.Key : "Other" },
+                    InputGestureText = ticked > 0 ? $"{ticked} shown" : airport.Count().ToString(),
+                };
+                menu.Items.Add(sub);
+                parent = sub;
+            }
+            foreach (var entry in airport)
+            {
+                // A text block, not a string: an underscore in a diagram name is not an access key.
+                var item = new MenuItem
+                {
+                    Header = new TextBlock { Text = entry.Name },
+                    InputGestureText = entry.Runways.Count > 0 ? "RWY " + string.Join(" ", entry.Runways) : "",
+                    IsCheckable = true, IsChecked = visible && chosen.Contains(entry.Key), StaysOpenOnClick = true,
+                };
+                item.Click += (_, _) =>
+                {
+                    if (item.IsChecked) chosen.Add(entry.Key);
+                    else chosen.Remove(entry.Key);
+                    SetChosenProcedures(kind, chosen.ToList(), show: true);
+                    all.IsChecked = chosen.Count == 0;
+                    none.IsChecked = false;
+                };
+                parent.Items.Add(item);
+            }
+        }
+        menu.IsOpen = true;
+    }
+
+    /// <summary>
+    /// Keeps the choice of procedures and draws only their diagrams (all of them when none is chosen). The map element
+    /// lists are replaced, not edited, so the radar sees the change.
+    /// </summary>
+    private void SetChosenProcedures(ProcedureKind kind, List<string> chosen, bool show)
+    {
+        string layer = ProcedureCatalog.Layer(kind);
+        var procedures = new Dictionary<string, List<string>>(_profile.ChosenProcedures, StringComparer.OrdinalIgnoreCase);
+        var items = new Dictionary<string, List<string>>(_profile.MapItems, StringComparer.OrdinalIgnoreCase);
+        if (chosen.Count == 0)
+        {
+            procedures.Remove(layer);
+            items.Remove(layer);
+        }
+        else
+        {
+            procedures[layer] = chosen;
+            var keys = new HashSet<string>(chosen, StringComparer.OrdinalIgnoreCase);
+            items[layer] = Radar.ProcedureEntries(kind).Where(x => keys.Contains(x.Key)).SelectMany(x => x.Diagrams)
+                .Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+        }
+        _profile.ChosenProcedures = procedures;
+        _profile.MapItems = items;
+        _profile.Layers[layer] = show;
+        BuildLayerList();
+        _dirty = true;
+        Radar.InvalidateVisual();
+        SaveProfile();
+    }
+
     private static string PluginFolder => Path.Combine(Profile.DefaultDirectory, "plugins");
 
     private static MenuItem MenuEntry(string header, Action click, string? gesture = null)
@@ -1315,6 +1410,7 @@ public partial class MainWindow : Window
             menu.Items.Add(MenuEntry("Show all map elements (not only the display's)", () =>
             {
                 _profile.MapItems.Clear();
+                _profile.ChosenProcedures = new(StringComparer.OrdinalIgnoreCase);
                 _dirty = true;
                 Radar.InvalidateVisual();
                 SaveProfile();
@@ -1510,6 +1606,7 @@ public partial class MainWindow : Window
         if (dialog.SelectedPath == null) return;
         _profile.ViewCenterLatitude = 0;
         _profile.MapItems.Clear();
+        _profile.ChosenProcedures = new(StringComparer.OrdinalIgnoreCase);
         LoadSector(dialog.SelectedPath);
         if (dialog.OpenAsGround) EnterGroundRadar(null);
         else _profile.GroundAirport = "";
@@ -1701,6 +1798,7 @@ public partial class MainWindow : Window
                     Coord(() => _workspace.StateOf(r) == TrackState.TransferToMe ? _session.RefuseHandoffAsync(r) : _session.ReleaseAsync(r));
                 return true;
             case "ToggleRoute": if (Radar.Selected is { } rt) { rt.ShowRoute = !rt.ShowRoute; _dirty = true; } return true;
+            case "ShowProcedure": ToggleProcedure(Radar.Selected); return true;
             case "ActiveRunways": OnRunwaysClick(this, new RoutedEventArgs()); return true;
             case "ToggleSil": ShowWindow("sil"); return true;
             case "ToggleSel": ShowWindow("sel"); return true;
@@ -1713,6 +1811,30 @@ public partial class MainWindow : Window
                 return true;
         }
         return false;
+    }
+
+    /// <summary>Tab: the SID or STAR the aircraft flies next, drawn with its points; again, and it is hidden.</summary>
+    private void ToggleProcedure(Track? t)
+    {
+        if (t == null)
+        {
+            Info("Select an aircraft first: Tab then shows the SID or STAR it will fly");
+            return;
+        }
+        if (t.ShowProcedure)
+        {
+            t.ShowProcedure = false;
+            _dirty = true;
+            return;
+        }
+        if (_workspace.Procedures.Expected(t) is not { } p)
+        {
+            Info(t.HasFlightPlan ? $"{t.Callsign}: no SID or STAR of the sector fits its flight plan" : $"{t.Callsign}: no flight plan");
+            return;
+        }
+        t.ShowProcedure = true;
+        _dirty = true;
+        Info($"{t.Callsign}: {(p.Kind == ProcedureKind.Sid ? "SID" : "STAR")} {p.Name}{(p.Runway.Length > 0 ? $" · RWY {p.Runway}" : "")}");
     }
 
     // ---- shutdown ----------------------------------------------------------------------------------------------
