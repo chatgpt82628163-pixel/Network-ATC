@@ -198,6 +198,10 @@ public sealed class Profile
     public SoundSettings Sounds { get; set; } = new();
     /// <summary>Load METARs for the active airports from aviationweather.gov.</summary>
     public bool FetchMetar { get; set; } = true;
+    /// <summary>At start, look for a newer release on GitHub and offer to install it.</summary>
+    public bool CheckForUpdates { get; set; } = true;
+    /// <summary>The release tag the program last installed by itself: that release is not offered again.</summary>
+    public string UpdateInstalledTag { get; set; } = "";
     /// <summary>Cleared level adherence: warn when the aircraft deviates from its CFL by more than this, feet.</summary>
     public int ClamFeet { get; set; } = 300;
 
@@ -458,6 +462,7 @@ public sealed class Profile
                 p.EsDisplayType ??= "";
                 p.EsDisplayData ??= [];
                 p.PluginsSector ??= "";
+                p.UpdateInstalledTag ??= "";
                 p.SectorPlugins = new Dictionary<string, SectorPluginSet>(p.SectorPlugins ?? [], StringComparer.OrdinalIgnoreCase);
                 if (p.Version < 6) MigrateToEnglish(p);
                 // Version 7: new default look (Graphite). A profile that kept the old default takes it; own colors stay.

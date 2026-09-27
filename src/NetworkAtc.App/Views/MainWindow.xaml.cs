@@ -200,6 +200,7 @@ public partial class MainWindow : Window
         UpdateConnectionState(false);
 
         Loaded += (_, _) => ApplyWindowLayouts();
+        Loaded += (_, _) => CheckForUpdatesAtStart();
         _frame.Tick += (_, _) => OnFrame();
         _frame.Start();
         PreviewKeyDown += OnPreviewKeyDown;
