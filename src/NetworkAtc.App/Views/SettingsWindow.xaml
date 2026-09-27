@@ -80,6 +80,7 @@
           <CheckBox Content="Open flight plan when selecting an aircraft" IsChecked="{Binding Panels.ShowFlightPlan}"/>
           <CheckBox x:Name="ResetWindowsBox" Content="Reset list window layout" Margin="0,14,0,0"/>
           <CheckBox Content="Fetch METAR for active airports (aviationweather.gov)" IsChecked="{Binding FetchMetar}" Margin="0,8,0,0"/>
+          <CheckBox Content="Check for updates at start and offer to install them" IsChecked="{Binding CheckForUpdates}" Margin="0,8,0,0"/>
 
           <TextBlock Text="SOUNDS" Style="{StaticResource SectionTitle}"/>
           <CheckBox Content="Sounds enabled" IsChecked="{Binding Sounds.Enabled}" FontWeight="SemiBold"/>

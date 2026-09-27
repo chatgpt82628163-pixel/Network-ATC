@@ -41,6 +41,11 @@ public sealed class Stca
                     result.Add(new Conflict(a, b, dh, dv, Predicted: false));
                     continue;
                 }
+                // Too far apart to meet within the look-ahead even flying straight at each other: nothing to predict.
+                // (The check runs for every pair in every radar frame.)
+                double reach = (Math.Max(a.GroundSpeed, 0) + Math.Max(b.GroundSpeed, 0)) * LookAheadMinutes / 60;
+                double closing = (Math.Abs(a.VerticalSpeed) + Math.Abs(b.VerticalSpeed)) * LookAheadMinutes;
+                if (dh - reach > HorizontalNm + 0.01 || dv - closing > VerticalFeet) continue;
                 // Linear prediction in 30 s steps.
                 for (double m = 0.5; m <= LookAheadMinutes; m += 0.5)
                 {

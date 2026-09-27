@@ -44,12 +44,28 @@ public static partial class AtisText
         return number.TrimStart('0').PadLeft(1, '0') + side;
     }
 
-    /// <summary>Replaces $airport with the ATIS airport, so the alias variables of the profile work for each ATIS.</summary>
-    public static string ForAirport(string line, string airport) =>
-        AirportVariable().Replace(line, airport.ToUpperInvariant());
+    /// <summary>
+    /// Replaces $airport with the ATIS airport, so the alias variables of the profile work for each ATIS. $time is
+    /// the time of the airport's METAR, as in any ATIS; a unit written after $wind goes, as the wind has its own
+    /// (MPS or KT, as in the METAR).
+    /// </summary>
+    public static string ForAirport(string line, string airport)
+    {
+        airport = airport.ToUpperInvariant();
+        line = AirportVariable().Replace(line, airport);
+        line = BareTime().Replace(line, $"$time({airport})");
+        return UnitAfterWind().Replace(line, "${wind}");
+    }
 
     [GeneratedRegex(@"\$airport\b", RegexOptions.IgnoreCase)]
     private static partial Regex AirportVariable();
+
+    [GeneratedRegex(@"\$time\b(?!\()")]
+    private static partial Regex BareTime();
+
+    [GeneratedRegex(@"(?<wind>\$wind(\([^)]*\))?)\s*(KNOTS|KNOT|KTS|KT|MPS|M/S|МПС|М/С|METERS PER SECOND|METRES PER SECOND|МЕТРОВ В СЕКУНДУ)(?=$|[\s.,;])",
+        RegexOptions.IgnoreCase)]
+    private static partial Regex UnitAfterWind();
 
     [GeneratedRegex(@"^(?<t>M?\d{2})/(?<d>M?\d{2})?$")]
     private static partial Regex TemperatureGroup();
@@ -90,14 +106,17 @@ public static partial class AtisText
 
         if (metar != null)
         {
+            // In the METAR's unit: metres per second in Russia, knots elsewhere.
+            string unit = metar.WindInMps ? (metar.WindSpeed == 1 ? "meter per second" : "meters per second")
+                : metar.WindSpeed == 1 ? "knot" : "knots";
             if (metar.VariableWind || metar.WindDirection == null && metar.WindSpeed > 0)
-                Say($"Wind variable {metar.WindSpeed} knots");
+                Say($"Wind variable {metar.WindSpeed} {unit}");
             else if (metar.WindSpeed == 0)
                 Say("Wind calm");
             else
             {
                 string gust = metar.Gust is { } g ? $", gusting {g}" : "";
-                Say($"Wind {metar.WindDirection:000} degrees {metar.WindSpeed} knots{gust}");
+                Say($"Wind {metar.WindDirection:000} degrees {metar.WindSpeed} {unit}{gust}");
             }
             DescribeBody(metar.Raw, Say);
             if (metar.Qnh is { } q) Say($"QNH {q}");

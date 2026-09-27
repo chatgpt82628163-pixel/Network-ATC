@@ -342,10 +342,21 @@ public sealed class RadarView : FrameworkElement
            .Append(theme.ArtccHigh).Append(theme.Artcc).Append(theme.Sid).Append(theme.Star).Append(theme.SectorLine).Append(theme.Runway);
         foreach (var layer in MapLayers) key.Append(Profile.IsLayerVisible(layer) ? '1' : '0');
         foreach (var layer in s.CustomLayers) key.Append('|').Append(layer).Append(Profile.IsLayerVisible(layer) ? '1' : '0');
-        foreach (var (layer, items) in Profile.MapItems.OrderBy(kv => kv.Key, StringComparer.OrdinalIgnoreCase))
-            key.Append('|').Append(layer).Append(':').Append(string.Join('\u0001', items));
+        // This key is checked in every frame and a display's element lists can be long: they are told apart by the
+        // lists themselves and their sizes, not their text (a display replaces them or clears them, never edits them).
+        if (!ReferenceEquals(_mapItemsSeen, Profile.MapItems))
+        {
+            _mapItemsSeen = Profile.MapItems;
+            _mapItemsGeneration++;
+        }
+        key.Append('|').Append(_mapItemsGeneration)
+           .Append(':').Append(Profile.MapItems.Count).Append(':').Append(Profile.MapItems.Values.Sum(v => v.Count));
         return key.ToString();
     }
+
+    /// <summary>The display's element lists last seen by <see cref="MapKey"/>, and how many different ones there were.</summary>
+    private object? _mapItemsSeen;
+    private int _mapItemsGeneration;
 
     private Point ToPlane(GeoPoint p)
     {
@@ -636,23 +647,43 @@ public sealed class RadarView : FrameworkElement
         }
     }
 
+    // The owned sectors in plane coordinates (NM), built again only when they or the projection change; every frame
+    // only places them, like the map.
+    private (IReadOnlyList<IReadOnlyList<GeoPoint>> Areas, Projection Projection, List<Geometry> Shapes)? _ownAirspace;
+
     /// <summary>The airspace the controller owns: a light tint of the accent colour with its border.</summary>
     private void DrawOwnAirspace(DrawingContext dc, Theme theme)
     {
         if (!Profile.HighlightOwnAirspace || OwnAirspace?.Invoke() is not { Count: > 0 } areas) return;
+        if (_ownAirspace is not { } own || !ReferenceEquals(own.Projection, _projection)
+            || own.Areas.Count != areas.Count || own.Areas.Where((a, i) => !ReferenceEquals(a, areas[i])).Any())
+        {
+            var shapes = new List<Geometry>();
+            foreach (var polygon in areas)
+            {
+                if (polygon.Count < 3) continue;
+                var geometry = new StreamGeometry();
+                using (var ctx = geometry.Open())
+                {
+                    ctx.BeginFigure(ToPlane(polygon[0]), true, true);
+                    ctx.PolyLineTo(polygon.Skip(1).Select(ToPlane).ToList(), true, false);
+                }
+                geometry.Freeze();
+                shapes.Add(geometry);
+            }
+            _ownAirspace = own = (areas, _projection, shapes);
+        }
         var fill = Paint.Brush(Paint.WithAlpha(theme.Accent, 0x16));
         var pen = Paint.Pen(Paint.WithAlpha(theme.Accent, 0x80), 1.2);
-        foreach (var polygon in areas)
+        // Plane to screen as in DrawSector: the transform sits on the geometry, so the border keeps its width in pixels.
+        double k = 1 / _nmPerPixel;
+        var view = new MatrixTransform(k, 0, 0, -k, ActualWidth / 2 - _cx * k, ActualHeight / 2 + _cy * k);
+        view.Freeze();
+        foreach (var shape in own.Shapes)
         {
-            if (polygon.Count < 3) continue;
-            var geometry = new StreamGeometry();
-            using (var ctx = geometry.Open())
-            {
-                ctx.BeginFigure(ToScreen(polygon[0]), true, true);
-                ctx.PolyLineTo(polygon.Skip(1).Select(p => ToScreen(p)).ToList(), true, false);
-            }
-            geometry.Freeze();
-            dc.DrawGeometry(fill, pen, geometry);
+            var placed = new GeometryGroup { Transform = view };
+            placed.Children.Add(shape);
+            dc.DrawGeometry(fill, pen, placed);
         }
     }
 
@@ -796,16 +827,13 @@ public sealed class RadarView : FrameworkElement
             }
             else
             {
-                var d = new StreamGeometry();
-                using (var ctx = d.Open())
-                {
-                    ctx.BeginFigure(new Point(p.X, p.Y - s - 1), false, true);
-                    ctx.LineTo(new Point(p.X + s + 1, p.Y), true, false);
-                    ctx.LineTo(new Point(p.X, p.Y + s + 1), true, false);
-                    ctx.LineTo(new Point(p.X - s - 1, p.Y), true, false);
-                }
-                d.Freeze();
-                dc.DrawGeometry(null, Paint.Pen(symbolColor, 1.3), d);
+                // A diamond of four lines: nothing to build for each aircraft in each frame.
+                var diamondPen = Paint.Pen(symbolColor, 1.3);
+                Point top = new(p.X, p.Y - s - 1), right = new(p.X + s + 1, p.Y), bottom = new(p.X, p.Y + s + 1), left = new(p.X - s - 1, p.Y);
+                dc.DrawLine(diamondPen, top, right);
+                dc.DrawLine(diamondPen, right, bottom);
+                dc.DrawLine(diamondPen, bottom, left);
+                dc.DrawLine(diamondPen, left, top);
             }
             if (t.Ident) dc.DrawEllipse(null, Paint.Pen(symbolColor, 1), p, s + 5, s + 5);
             if (t.HaloNm is { } halo)

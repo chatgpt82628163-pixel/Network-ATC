@@ -3,12 +3,15 @@ name: Release
 # Builds a ready-to-run Network-ATC for Windows x64 (self-contained, no .NET install needed).
 #  - Every push to main, pull request and manual run: the package is attached to the run as an artifact.
 #  - Every run also builds the installer Network-ATC-Setup-<version>.exe (Inno Setup, installer/Network-ATC.iss).
-#  - Tags v*: the installer and the zip are published as a GitHub Release.
+#  - Release tags (0.2.0 or v0.2.0, also when the release is created on GitHub):
+#    the installer and the zip are published as a GitHub Release.
+#    Installed programs find the new installer there and update themselves.
 on:
   workflow_dispatch:
   push:
     branches: [main]
-    tags: ["v*"]
+    # A release tag, with or without "v" (0.2.0 or v0.2.0): the version of the program and its installer.
+    tags: ["v*", "[0-9]*"]
   pull_request:
 
 permissions:
